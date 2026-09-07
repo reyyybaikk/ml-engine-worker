@@ -56,11 +56,12 @@ def start_worker():
 
     while True:
         try:
-            # Mengambil job dari Redis list menggunakan blpop (blocking pop) agar efisien CPU
-            # Format output brpop: ('fuel_queue', '{"transactionId": 12}')
-            queue_name, raw_data = redis_client.brpop("fuel_queue", timeout=0)
+            # Menggunakan timeout=20 agar koneksi tidak idle terlalu lama (mencegah Socket Timeout)
+            # result akan None jika dalam 20 detik tidak ada data
+            result = redis_client.brpop("fuel_queue", timeout=20)
             
-            if raw_data:
+            if result:
+                queue_name, raw_data = result
                 job_payload = json.loads(raw_data)
                 transaction_id = job_payload.get("transactionId")
 
@@ -75,11 +76,13 @@ def start_worker():
                 print(f"[Python Worker] ✅ Job Transaction ID {transaction_id} selesai diproses.")
 
         except KeyboardInterrupt:
-            print("\n[Python Worker] Worker dihentikan secara manual oleh pengguna (Graceful Shutdown).")
+            print("\n[Python Worker] Worker dihentikan secara manual.")
             break
+        except (redis.exceptions.TimeoutError, redis.exceptions.ConnectionError):
+            # Ini normal terjadi pada cloud Redis, kita cukup diam dan lanjut loop
+            continue
         except Exception as e:
-            print(f"[Python Worker Error] Terjadi kesalahan saat memproses job: {e}")
-            # Jeda sebentar agar worker tidak looping terlalu cepat saat terjadi error koneksi
+            print(f"[Python Worker Error] Terjadi kesalahan: {e}")
             time.sleep(2)
 
 if __name__ == "__main__":
