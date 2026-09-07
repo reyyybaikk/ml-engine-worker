@@ -55,10 +55,14 @@ def start_worker():
     print("[Python Worker] Menunggu job baru dari Redis ('fuel_queue')...")
     print("==================================================")
 
+    last_heartbeat = time.time()
     while True:
         try:
-            # Menggunakan timeout=20 agar koneksi tidak idle terlalu lama (mencegah Socket Timeout)
-            # result akan None jika dalam 20 detik tidak ada data
+            # Heartbeat setiap 60 detik
+            if time.time() - last_heartbeat > 60:
+                print(f"[Python Worker] Heartbeat: Masih memantau antrean 'fuel_queue'...")
+                last_heartbeat = time.time()
+
             result = redis_client.brpop("fuel_queue", timeout=20)
             
             if result:
@@ -66,7 +70,7 @@ def start_worker():
                 job_payload = json.loads(raw_data)
                 transaction_id = job_payload.get("transactionId")
 
-                print(f"\n[Python Worker] 📥 Menerima job untuk Transaction ID: {transaction_id}")
+                print(f"\n[Python Worker] 📥 MENERIMA JOB! Transaction ID: {transaction_id}")
 
                 # 1. Jalankan Inference Pipeline
                 inference_result = run_inference_for_transaction(transaction_id)
@@ -80,7 +84,7 @@ def start_worker():
             print("\n[Python Worker] Worker dihentikan secara manual.")
             break
         except (redis.exceptions.TimeoutError, redis.exceptions.ConnectionError):
-            # Ini normal terjadi pada cloud Redis, kita cukup diam dan lanjut loop
+            # Lanjut loop jika timeout
             continue
         except Exception as e:
             print(f"[Python Worker Error] Terjadi kesalahan: {e}")
