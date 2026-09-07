@@ -58,19 +58,21 @@ def start_worker():
     last_heartbeat = time.time()
     while True:
         try:
-            # Heartbeat setiap 60 detik
-            if time.time() - last_heartbeat > 60:
-                print(f"[Python Worker] Heartbeat: Masih memantau antrean 'fuel_queue'...")
+            # Heartbeat setiap 30 detik (lebih sering agar kita tahu worker hidup)
+            if time.time() - last_heartbeat > 30:
+                print(f"[Python Worker] Heartbeat: Masih memantau antrean 'fuel_queue'...", flush=True)
                 last_heartbeat = time.time()
 
             result = redis_client.brpop("fuel_queue", timeout=20)
             
             if result:
                 queue_name, raw_data = result
+                print(f"[Python Worker] Raw data diterima dari Redis: {raw_data}", flush=True)
+
                 job_payload = json.loads(raw_data)
                 transaction_id = job_payload.get("transactionId")
 
-                print(f"\n[Python Worker] 📥 MENERIMA JOB! Transaction ID: {transaction_id}")
+                print(f"\n[Python Worker] 📥 MENERIMA JOB! Transaction ID: {transaction_id}", flush=True)
 
                 # 1. Jalankan Inference Pipeline
                 inference_result = run_inference_for_transaction(transaction_id)
@@ -78,16 +80,15 @@ def start_worker():
                 # 2. Simpan Hasil ke PostgreSQL
                 save_inference_result_to_db(inference_result)
 
-                print(f"[Python Worker] ✅ Job Transaction ID {transaction_id} selesai diproses.")
+                print(f"[Python Worker] ✅ Job Transaction ID {transaction_id} selesai diproses.", flush=True)
 
         except KeyboardInterrupt:
-            print("\n[Python Worker] Worker dihentikan secara manual.")
+            print("\n[Python Worker] Worker dihentikan.", flush=True)
             break
         except (redis.exceptions.TimeoutError, redis.exceptions.ConnectionError):
-            # Lanjut loop jika timeout
             continue
         except Exception as e:
-            print(f"[Python Worker Error] Terjadi kesalahan: {e}")
+            print(f"[Python Worker Error] Terjadi kesalahan kritis: {str(e)}", flush=True)
             time.sleep(2)
 
 if __name__ == "__main__":
