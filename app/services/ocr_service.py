@@ -1,6 +1,7 @@
 import os
 import io
 import re
+import requests
 import pytesseract
 from PIL import Image, ImageFilter, ImageEnhance
 
@@ -12,13 +13,15 @@ if os.name == 'nt':  # Windows
 
 def _preprocess_image(image_input) -> Image.Image:
     """
-    Melakukan preprocessing gambar agar kualitas OCR lebih baik:
-    Dapat menerima:
-    - bytes / memoryview / bytearray (dari PostgreSQL BYTEA)
-    - str filepath
+    Melakukan preprocessing gambar agar kualitas OCR lebih baik.
+    Mendukung: bytes, filepath, atau URL.
     """
     if isinstance(image_input, (bytes, memoryview, bytearray)):
         img = Image.open(io.BytesIO(bytes(image_input))).convert('L')
+    elif isinstance(image_input, str) and image_input.startswith("http"):
+        # Download gambar dari URL (Supabase Storage)
+        response = requests.get(image_input, stream=True)
+        img = Image.open(response.raw).convert('L')
     else:
         img = Image.open(image_input).convert('L')
 

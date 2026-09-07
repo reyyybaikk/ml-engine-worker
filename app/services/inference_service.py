@@ -50,7 +50,7 @@ def run_inference_for_transaction(transaction_id: int) -> dict:
         connection = get_db_connection()
         cursor = connection.cursor()
 
-        # Query gabungkan data transaksi + master kendaraan (termasuk binary foto BYTEA)
+        # Query disesuaikan dengan kolom asli di Supabase (menggunakan _path)
         query = """
             SELECT 
                 ft.id,
@@ -61,9 +61,9 @@ def run_inference_for_transaction(transaction_id: int) -> dict:
                 ft.odometer,
                 ft.filling_source,
                 ft.fuel_type,
-                ft.odometer_photo_data,
-                ft.receipt_photo_data,
-                ft.odometer_after_photo_data,
+                ft.odometer_photo_path,
+                ft.receipt_photo_path,
+                ft.odometer_after_photo_path,
                 ft.receipt_photo_hash,
                 ft.created_at,
                 v.fuel_tank_capacity,
@@ -101,11 +101,14 @@ def run_inference_for_transaction(transaction_id: int) -> dict:
         # 2. Input Validation
         validate_transaction_data(tx_dict)
 
-        # 3. OCR — hanya baca foto struk/nota SPBU (Odometer tidak perlu di-OCR)
-        receipt_input = tx_dict.get("receipt_photo_data")
+        # 3. OCR — Mengambil foto dari URL Supabase Storage
+        receipt_url = tx_dict.get("receipt_photo_path")
 
-        print(f"[Python Inference] Memulai OCR Nota/Struk untuk Transaction ID {transaction_id}...")
-        ocr_receipt = read_receipt(receipt_input)
+        # Jika path tidak diawali http, tambahkan base URL storage jika perlu
+        # Namun di screenshot Anda sudah terlihat URL lengkap
+
+        print(f"[Python Inference] Memulai OCR Nota dari URL untuk Transaction ID {transaction_id}...")
+        ocr_receipt = read_receipt(receipt_url)
 
         # Merge hasil OCR ke dalam data transaksi
         tx_dict["ocr_liters"] = ocr_receipt.get("liters") if ocr_receipt else None
@@ -138,4 +141,4 @@ def run_inference_for_transaction(transaction_id: int) -> dict:
         if cursor:
             cursor.close()
         if connection:
-            connection.close()
+            connection.close()
