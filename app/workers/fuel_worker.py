@@ -1,5 +1,6 @@
 import json
 import time
+import redis
 from app.config.redis_client import redis_client
 from app.config.db_client import get_db_connection
 from app.services.inference_service import run_inference_for_transaction
