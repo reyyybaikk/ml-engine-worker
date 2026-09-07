@@ -107,24 +107,20 @@ def run_inference_for_transaction(transaction_id: int) -> dict:
         # Jika path tidak diawali http, tambahkan base URL storage jika perlu
         # Namun di screenshot Anda sudah terlihat URL lengkap
 
-        print(f"[Python Inference] Memulai OCR Nota dari URL untuk Transaction ID {transaction_id}...")
+        print(f"[Python Inference] Memulai OCR Nota dari URL: {receipt_url}", flush=True)
         ocr_receipt = read_receipt(receipt_url)
-
-        # Merge hasil OCR ke dalam data transaksi
-        tx_dict["ocr_liters"] = ocr_receipt.get("liters") if ocr_receipt else None
-        tx_dict["ocr_total_cost"] = ocr_receipt.get("total_cost") if ocr_receipt else None
-        tx_dict["ocr_fuel_type"] = ocr_receipt.get("fuel_type") if ocr_receipt else None
-        tx_dict["ocr_receipt_data"] = ocr_receipt  # Simpan raw untuk DB
-
-        print(f"[Python Inference] OCR Nota selesai — Struk: {ocr_receipt}")
+        print(f"[Python Inference] Hasil OCR: {ocr_receipt}", flush=True)
 
         # 4. Feature Engineering
+        print(f"[Python Inference] Ekstraksi fitur...", flush=True)
         features = extract_features(tx_dict)
 
         # 5. Data Preprocessing
+        print(f"[Python Inference] Preprocessing...", flush=True)
         preprocessed = preprocess_features(features)
 
-        # 6. Rule Engine Evaluation (Inference Prediction)
+        # 6. Rule Engine Evaluation
+        print(f"[Python Inference] Menjalankan Rule Engine...", flush=True)
         inference_result = evaluate_transaction_rules(preprocessed)
 
         # Tambahkan data transaksi lengkap ke result agar fuel_worker bisa kirim WA
