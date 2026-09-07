@@ -11,21 +11,33 @@ REDIS_PASSWORD = os.getenv("REDIS_PASSWORD", None)
 
 def get_redis_client():
     """
-    Membuat satu instance koneksi Redis yang dapat di-reuse (Connection Reuse)
-    tanpa socket_timeout yang mengganggu fungsi blocking (brpop).
+    Membuat satu instance koneksi Redis yang dapat di-reuse.
+    Mendukung koneksi via REDIS_URL (Railway/Render) atau host/port individual.
     """
     try:
-        client = redis.Redis(
-            host=REDIS_HOST,
-            port=REDIS_PORT,
-            password=REDIS_PASSWORD if REDIS_PASSWORD else None,
-            decode_responses=True,  # Agar hasil pembacaan berupa string, bukan bytes
-            retry_on_timeout=True
-        )
+        redis_url = os.getenv("REDIS_URL")
+
+        if redis_url:
+            # Menggunakan URL lengkap jika tersedia (biasanya di Railway)
+            client = redis.from_url(
+                redis_url,
+                decode_responses=True,
+                retry_on_timeout=True
+            )
+            print(f"[Python Redis] Berhasil terhubung menggunakan REDIS_URL")
+        else:
+            # Fallback ke konfigurasi host/port satuan
+            client = redis.Redis(
+                host=REDIS_HOST,
+                port=REDIS_PORT,
+                password=REDIS_PASSWORD if REDIS_PASSWORD else None,
+                decode_responses=True,
+                retry_on_timeout=True
+            )
+            print(f"[Python Redis] Berhasil terhubung ke server Redis di {REDIS_HOST}:{REDIS_PORT}")
         
         # Lakukan tes koneksi awal (PING)
         client.ping()
-        print(f"[Python Redis] Berhasil terhubung ke server Redis di {REDIS_HOST}:{REDIS_PORT}")
         return client
         
     except Exception as e:
