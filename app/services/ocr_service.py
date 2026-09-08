@@ -11,20 +11,24 @@ if os.name == 'nt':  # Windows
 # Di Linux (Render/Docker), Tesseract biasanya ada di /usr/bin/tesseract yang sudah masuk PATH
 
 
-def _preprocess_image(image_input) -> Image.Image:
+def _preprocess_image(image_input, force_landscape=False) -> Image.Image:
     """
     Melakukan preprocessing gambar agar kualitas OCR lebih baik.
     Mendukung: bytes, filepath, atau URL.
     """
     if isinstance(image_input, (bytes, memoryview, bytearray)):
-        img = Image.open(io.BytesIO(bytes(image_input))).convert('L')
+        img = Image.open(io.BytesIO(bytes(image_input)))
     elif isinstance(image_input, str) and image_input.startswith("http"):
-        # Download gambar dari URL (Supabase Storage)
         response = requests.get(image_input, stream=True)
-        img = Image.open(response.raw).convert('L')
+        img = Image.open(response.raw)
     else:
-        img = Image.open(image_input).convert('L')
+        img = Image.open(image_input)
 
+    # Auto-Rotate if Portrait but Odometer target
+    if force_landscape and img.height > img.width:
+        img = img.rotate(-90, expand=True)
+
+    img = img.convert('L') # Grayscale
     img = ImageEnhance.Contrast(img).enhance(2.0)       # Tingkatkan kontras
     img = img.filter(ImageFilter.SHARPEN)               # Sharpen
     return img
@@ -32,11 +36,59 @@ def _preprocess_image(image_input) -> Image.Image:
 
 def read_odometer(image_input) -> int | None:
     """
-    [DEPRECATED] Membaca angka odometer dari foto odometer kendaraan.
-    Fungsi ini dinonaktifkan karena akurasi OCR pada layar odometer sering tidak stabil.
-    Validasi dialihkan ke input manual driver.
+    Membaca angka odometer dari foto dashboard kendaraan.
+    Menerapkan normalisasi karakter (S->5, B->8) dan heuristik angka terbesar.
     """
-    print("[OCR Odometer] SKIPPED: Odometer OCR is currently disabled.")
+    if not image_input:
+        return None
+
+    try:
+        img = _preprocess_image(image_input, force_landscape=True)
+        config = '--oem 3 --psm 6'
+        raw_text = pytesseract.image_to_string(img, config=config, lang='eng')
+
+        print(f"[OCR Odometer] Raw text:\n{raw_text}")
+
+        return _parse_odometer_text(raw_text)
+    except Exception as e:
+        print(f"[OCR Odometer Error] {e}")
+        return None
+
+
+def _parse_odometer_text(text: str) -> int | None:
+    """
+    Logika ekstraksi angka odometer dengan normalisasi karakter.
+    """
+    lines = text.split("\n")
+    candidates = []
+
+    # Normalisasi mirip logika Android
+    normalization_map = {
+        'S': '5', 'G': '6', 'B': '8', 'Z': '2', 'O': '0', 'o': '0', 'I': '1', 'l': '1'
+    }
+
+    odo_keywords = ["ODO", "TOTAL", "KM", "RANGE"]
+
+    for line in lines:
+        upper_line = line.upper()
+        # Terapkan normalisasi karakter digital
+        normalized = "".join([normalization_map.get(c, c) for c in upper_line])
+
+        # Cari deretan angka 4-7 digit
+        matches = re.findall(r'(\d{4,7})', normalized)
+        for match in matches:
+            num = int(match)
+            if num in [2025, 2026]: continue # Abaikan tahun
+
+            # Jika ada keyword pendukung, prioritaskan
+            if any(k in upper_line for k in odo_keywords):
+                return num
+
+            candidates.append(num)
+
+    # Heuristik: Ambil angka terbesar (biasanya Odometer > Trip/Clock)
+    if candidates:
+        return max(candidates)
     return None
 
 
@@ -46,37 +98,27 @@ def read_receipt(image_input) -> dict | None:
     - liters: jumlah liter BBM
     - total_cost: total harga
     - fuel_type: jenis BBM (Pertalite, Pertamax, Biosolar, dll)
-    
-    Mengembalikan dict atau None jika gagal.
     """
     if not image_input:
-        return None
-    if isinstance(image_input, str) and not os.path.exists(image_input):
-        print(f"[OCR Receipt] File tidak ditemukan: {image_input}")
         return None
 
     try:
         img = _preprocess_image(image_input)
-
-        # Mode PSM 6: asumsikan blok teks (cocok untuk struk)
         config = '--oem 3 --psm 6'
         raw_text = pytesseract.image_to_string(img, config=config, lang='ind+eng')
 
-        print(f"[OCR Receipt] Raw text dari struk:\n{raw_text}")
+        print(f"[OCR Receipt] Raw text:\n{raw_text}")
 
         extracted = _parse_receipt_text(raw_text)
-        print(f"[OCR Receipt] Hasil ekstraksi: {extracted}")
         return extracted
-
     except Exception as e:
-        print(f"[OCR Receipt Error] Gagal memproses struk: {e}")
+        print(f"[OCR Receipt Error] {e}")
         return None
 
 
 def _parse_receipt_text(text: str) -> dict:
     """
     Mem-parsing raw text OCR dari struk BBM.
-    Mencari pola: jumlah liter, total harga, dan nama BBM.
     """
     result = {
         'liters': None,
@@ -84,10 +126,9 @@ def _parse_receipt_text(text: str) -> dict:
         'fuel_type': None
     }
 
-    # Normalisasi teks: lowercase untuk matching
     text_lower = text.lower()
 
-    # 1. Cari jenis BBM (urutan prioritas dari yang paling spesifik)
+    # 1. Fuel Type
     fuel_type_map = [
         ('pertamina dex', 'Pertamina Dex'),
         ('pertadex', 'Pertamina Dex'),
@@ -96,18 +137,18 @@ def _parse_receipt_text(text: str) -> dict:
         ('bio solar', 'Biosolar'),
         ('pertamax', 'Pertamax'),
         ('pertalite', 'Pertalite'),
+        ('solar', 'Biosolar'),
     ]
     for keyword, fuel_name in fuel_type_map:
         if keyword in text_lower:
             result['fuel_type'] = fuel_name
             break
 
-    # 2. Cari jumlah liter — pola: "Volume: 12.50", "12,50 L", "Jumlah: 12", dll.
+    # 2. Liters
     liter_patterns = [
-        r'(?:volume|jumlah|liter|qty|vol)\s*[:;=\-]?\s*(\d+[.,]\d+)',
+        r'(?:volume|jumlah|liter|qty|vol|ltr)\s*[:;=\-]?\s*(\d+[.,]\d+)',
         r'(\d+[.,]\d+)\s*[lL](?:iter|tr)?',
-        r'(?:volume|jumlah|liter|qty|vol)\s*[:;=\-]?\s*(\d+)',
-        r'(\d+)\s*[lL](?:iter|tr)\b',
+        r'(?:volume|jumlah|liter|qty|vol|ltr)\s*[:;=\-]?\s*(\d+)',
     ]
     for pattern in liter_patterns:
         match = re.search(pattern, text, re.IGNORECASE)
@@ -116,27 +157,22 @@ def _parse_receipt_text(text: str) -> dict:
             try:
                 result['liters'] = float(raw_val)
                 break
-            except ValueError:
-                pass
+            except ValueError: pass
 
-    # 3. Cari total harga — pola: "TOTAL BIAYA ; Rp 160,000", "Tunai Rp 160,000", "Total: Rp 150.000", dll.
+    # 3. Total Cost
     cost_patterns = [
-        r'(?:total\s*(?:biaya|biava|harga|bayar)?|jumlah\s*bayar|grand\s*total|tunai|tunas|cash)\s*[:;=\-]?\s*(?:[Rr][pP]\.?)?\s*([\d.,]{4,})',
+        r'(?:total\s*(?:biaya|biava|harga|bayar)?|jumlah\s*bayar|grand\s*total|tunai|cash|rp)\s*[:;=\-]?\s*(?:[Rr][pP]\.?)?\s*([\d.,]{4,})',
         r'[tT]otal\s*[:;=\-]?\s*[Rr][pP]\.?\s*([\d.,]+)',
-        r'(?<!\/liter\s)(?<!\/liter\s:\s)[Rr][pP]\.?\s*([\d.,]{5,})',
-        r'[tT]otal\s*[:;=\-]?\s*([\d.]{5,})',
     ]
     for pattern in cost_patterns:
         match = re.search(pattern, text, re.IGNORECASE)
         if match:
-            # Ambil digit numerik
             raw_val = re.sub(r'[^\d]', '', match.group(1))
             try:
                 val = float(raw_val)
-                if val >= 1000:  # Nominal harga minimal wajar (bukan tanggal/nomor struk)
+                if val >= 1000:
                     result['total_cost'] = val
                     break
-            except ValueError:
-                pass
+            except ValueError: pass
 
     return result
