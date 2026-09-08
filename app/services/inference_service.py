@@ -103,13 +103,26 @@ def run_inference_for_transaction(transaction_id: int) -> dict:
 
         # 3. OCR — Mengambil foto dari URL Supabase Storage
         receipt_url = tx_dict.get("receipt_photo_path")
+        odo_before_url = tx_dict.get("odometer_photo_path")
+        odo_after_url = tx_dict.get("odometer_after_photo_path")
 
-        # Jika path tidak diawali http, tambahkan base URL storage jika perlu
-        # Namun di screenshot Anda sudah terlihat URL lengkap
-
-        print(f"[Python Inference] Memulai OCR Nota dari URL: {receipt_url}", flush=True)
+        print(f"[Python Inference] Memulai OCR Nota...", flush=True)
         ocr_receipt = read_receipt(receipt_url)
-        print(f"[Python Inference] Hasil OCR: {ocr_receipt}", flush=True)
+
+        print(f"[Python Inference] Memulai OCR Odo Sebelum...", flush=True)
+        ocr_odo_before = read_odometer(odo_before_url)
+
+        print(f"[Python Inference] Memulai OCR Odo Sesudah...", flush=True)
+        ocr_odo_after = read_odometer(odo_after_url)
+
+        print(f"[Python Inference] Hasil OCR - Nota: {ocr_receipt}, OdoBefore: {ocr_odo_before}, OdoAfter: {ocr_odo_after}", flush=True)
+
+        # Tambahkan hasil OCR ke tx_dict untuk diolah feature_service
+        tx_dict["ocr_liters"] = ocr_receipt.get("liters") if ocr_receipt else None
+        tx_dict["ocr_total_cost"] = ocr_receipt.get("total_cost") if ocr_receipt else None
+        tx_dict["ocr_fuel_type"] = ocr_receipt.get("fuel_type") if ocr_receipt else None
+        tx_dict["ocr_odometer_before"] = ocr_odo_before
+        tx_dict["ocr_odometer_after"] = ocr_odo_after
 
         # 4. Feature Engineering
         print(f"[Python Inference] Ekstraksi fitur...", flush=True)
@@ -123,9 +136,41 @@ def run_inference_for_transaction(transaction_id: int) -> dict:
         print(f"[Python Inference] Menjalankan Rule Engine...", flush=True)
         inference_result = evaluate_transaction_rules(preprocessed)
 
+        # Simpan hasil OCR ke database Supabase
+        try:
+            import json
+            cursor.execute("""
+                UPDATE fuel_transactions
+                SET ocr_receipt_data = %s,
+                    ocr_odometer_before = %s,
+                    ocr_odometer_after = %s,
+                    ml_is_anomaly = %s,
+                    ml_anomaly_score = %s,
+                    ml_anomaly_reasons = %s,
+                    notes = %s,
+                    status = %s
+                WHERE id = %s
+            """, (
+                json.dumps(ocr_receipt) if ocr_receipt else None,
+                ocr_odo_before,
+                ocr_odo_after,
+                inference_result["is_anomaly"],
+                inference_result["anomaly_score"],
+                inference_result["notes"],
+                inference_result["notes"],
+                "REVIEW" if inference_result["is_anomaly"] else "COMPLETED",
+                transaction_id
+            ))
+            connection.commit()
+            print(f"[Python Inference] Database updated for Transaction ID {transaction_id}")
+        except Exception as db_err:
+            print(f"[Python Inference DB Error] {db_err}")
+
         # Tambahkan data transaksi lengkap ke result agar fuel_worker bisa kirim WA
         inference_result["transaction_full"] = tx_dict
         inference_result["ocr_receipt_data"] = ocr_receipt
+        inference_result["ocr_odo_before"] = ocr_odo_before
+        inference_result["ocr_odo_after"] = ocr_odo_after
 
         print(f"[Python Inference] Berhasil menyelesaikan analisis untuk Transaction ID {transaction_id}.")
         return inference_result
