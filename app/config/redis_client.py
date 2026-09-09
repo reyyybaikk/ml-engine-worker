@@ -28,10 +28,14 @@ def get_redis_client():
                 redis_url,
                 decode_responses=True,
                 retry_on_timeout=True,
-                health_check_interval=30,  # Ping tiap 30 detik agar koneksi tetap hidup
+                health_check_interval=30,
                 socket_connect_timeout=10,
-                socket_keepalive=True      # Menjaga TCP socket tidak idle
+                socket_keepalive=True
             )
+            # Log untuk verifikasi host (tanpa password untuk keamanan)
+            from urllib.parse import urlparse
+            parsed_url = urlparse(redis_url)
+            print(f"[Python Redis] Terhubung ke host: {parsed_url.hostname}")
         else:
             print(f"[Python Redis] WARNING: REDIS_URL tidak ditemukan. Menggunakan fallback {REDIS_HOST}:{REDIS_PORT}")
             client = redis.Redis(
