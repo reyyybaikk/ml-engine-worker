@@ -53,12 +53,14 @@ def start_worker():
     print("==================================================")
     print("[Python Worker] 🚀 Memulai Anomaly Detection Worker...")
 
-    # Cek jumlah antrean saat ini
+    # DEBUG: Cek semua kunci yang ada di Redis untuk memastikan kita di 'gudang' yang sama
     try:
+        all_keys = redis_client.keys("*")
+        print(f"[Python Worker] Kunci yang ditemukan di Redis: {all_keys}")
         q_len = redis_client.llen("fuel_queue")
-        print(f"[Python Worker] Jumlah item di antrean 'fuel_queue' saat ini: {q_len}")
+        print(f"[Python Worker] Panjang antrean 'fuel_queue' (via LLEN): {q_len}")
     except Exception as e:
-        print(f"[Python Worker] Gagal cek panjang antrean: {e}")
+        print(f"[Python Worker] Gagal akses Redis: {e}")
 
     print("[Python Worker] Menunggu job baru dari Redis ('fuel_queue')...")
     print("==================================================")
