@@ -70,17 +70,27 @@ def start_worker():
         try:
             # Heartbeat setiap 30 detik (lebih sering agar kita tahu worker hidup)
             if time.time() - last_heartbeat > 30:
-                print(f"[Python Worker] Heartbeat: Menunggu di antrean 'fuel_queue' (Status Redis: {redis_client.ping()})...", flush=True)
+                print(f"[Python Worker] Heartbeat: Menunggu di antrean... (Status Redis: {redis_client.ping()})...", flush=True)
                 last_heartbeat = time.time()
 
-            result = redis_client.brpop("fuel_queue", timeout=10)
+            # 1. Coba ambil dari 'fuel_queue' (Simple)
+            result = redis_client.brpop("fuel_queue", timeout=5)
+
+            # 2. Jika kosong, ambil dari antrean BullMQ (yang terdeteksi di log tadi)
+            if not result:
+                result = redis_client.brpop("bull:fuel-analysis-queue:wait", timeout=5)
             
             if result:
                 queue_name, raw_data = result
-                print(f"[Python Worker] 📥 RAW DATA DITERIMA: {raw_data}", flush=True)
+                print(f"[Python Worker] 📥 DATA DITERIMA dari {queue_name}: {raw_data}", flush=True)
 
                 job_payload = json.loads(raw_data)
-                transaction_id = job_payload.get("transactionId")
+
+                # BullMQ membungkus data di dalam field 'data'
+                if isinstance(job_payload, dict) and "data" in job_payload:
+                    transaction_id = job_payload["data"].get("transactionId")
+                else:
+                    transaction_id = job_payload.get("transactionId")
 
                 job_payload = json.loads(raw_data)
                 transaction_id = job_payload.get("transactionId")
