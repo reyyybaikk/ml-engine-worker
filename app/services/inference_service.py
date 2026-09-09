@@ -1,185 +1,102 @@
 import os
+import json
 from app.config.db_client import get_db_connection
 from app.services.validation_service import validate_transaction_data
 from app.services.feature_service import extract_features
 from app.preprocessing.preprocessing_service import preprocess_features
 from app.services.rule_engine import evaluate_transaction_rules
 from app.services.ocr_service import read_odometer, read_receipt
-
-# Base path folder uploads backend
-UPLOADS_BASE_PATH = os.getenv("UPLOADS_BASE_PATH", "../backend/uploads/")
-
-
-def _resolve_photo_path(filename: str) -> str | None:
-    """Mengubah nama file menjadi absolute path yang dapat dibaca OCR."""
-    if not filename:
-        return None
-    if os.path.isabs(filename) and os.path.exists(filename):
-        return filename
-    
-    # 1. Coba path dari env / default relative
-    candidate1 = os.path.join(UPLOADS_BASE_PATH, filename)
-    if os.path.exists(candidate1):
-        return os.path.abspath(candidate1)
-    
-    # 2. Coba path absolute berdasarkan root proyek
-    current_dir = os.path.dirname(os.path.abspath(__file__))
-    candidate2 = os.path.abspath(os.path.join(current_dir, "../../../backend/uploads", filename))
-    if os.path.exists(candidate2):
-        return candidate2
-
-    return candidate1
-
+from app.services.notification_service import send_anomaly_notification
 
 def run_inference_for_transaction(transaction_id: int) -> dict:
-    """
-    Menjalankan seluruh pipeline inference untuk sebuah transaction_id:
-    1. Mengambil data transaksi & master kendaraan dari PostgreSQL.
-    2. Validasi input.
-    3. OCR foto odometer sebelum, foto struk, foto odometer sesudah.
-    4. Ekstraksi fitur (termasuk fitur OCR).
-    5. Preprocessing data.
-    6. Evaluasi Rule Engine (Anomaly Detection).
-    
-    Returns: dict hasil inference lengkap termasuk data transaksi untuk notifikasi WA.
-    """
     connection = None
     cursor = None
     try:
-        # 1. Buka koneksi database PostgreSQL
         connection = get_db_connection()
         cursor = connection.cursor()
 
-        # Query disesuaikan dengan kolom asli di Supabase (menggunakan _path)
-        query = """
+        # 1. Ambil data transaksi saat ini
+        query_current = """
             SELECT 
-                ft.id,
-                ft.vehicle_id,
-                ft.driver_id,
-                ft.fuel_amount,
-                ft.total_cost,
-                ft.odometer,
-                ft.filling_source,
-                ft.fuel_type,
-                ft.odometer_photo_path,
-                ft.receipt_photo_path,
-                ft.odometer_after_photo_path,
-                ft.receipt_photo_hash,
-                ft.created_at,
-                v.fuel_tank_capacity,
-                v.fuel_consumption_rate,
-                v.license_plate,
-                u.full_name AS driver_name
+                ft.*,
+                v.fuel_tank_capacity, v.fuel_consumption_rate as target_rate, v.license_plate,
+                u.full_name AS driver_name, u.whatsapp_number AS driver_whatsapp
             FROM fuel_transactions ft
             JOIN vehicles v ON ft.vehicle_id = v.id
             JOIN users u ON ft.driver_id = u.id
             WHERE ft.id = %s;
         """
-        cursor.execute(query, (transaction_id,))
-        transaction_data = cursor.fetchone()
+        cursor.execute(query_current, (transaction_id,))
+        tx_dict = cursor.fetchone()
 
-        if not transaction_data:
-            raise ValueError(f"Transaction ID {transaction_id} tidak ditemukan di database atau relasi kendaraan invalid.")
+        if not tx_dict:
+            raise ValueError(f"Transaction ID {transaction_id} tidak ditemukan.")
 
-        # Konversi RealDictRow ke dictionary biasa
-        tx_dict = dict(transaction_data)
+        # 2. Ambil Stand Odo dari transaksi SEBELUMNYA (Last Filling)
+        query_prev = """
+            SELECT odometer FROM fuel_transactions
+            WHERE vehicle_id = %s AND id < %s
+            ORDER BY id DESC LIMIT 1;
+        """
+        cursor.execute(query_prev, (tx_dict['vehicle_id'], transaction_id))
+        prev_tx = cursor.fetchone()
 
-        # Cek apakah hash nota sudah pernah ada di transaksi sebelumnya (Anti-Fraud)
-        receipt_hash = tx_dict.get("receipt_photo_hash")
-        duplicate_receipt_tx_id = None
-        if receipt_hash:
-            cursor.execute(
-                "SELECT id FROM fuel_transactions WHERE receipt_photo_hash = %s AND id != %s ORDER BY id ASC LIMIT 1;",
-                (receipt_hash, transaction_id)
-            )
-            dup = cursor.fetchone()
-            if dup:
-                duplicate_receipt_tx_id = dup["id"] if isinstance(dup, dict) else dup[0]
+        last_odo = prev_tx['odometer'] if prev_tx else tx_dict['odometer'] # Fallback ke odo sekarang jika data pertama
 
-        tx_dict["duplicate_receipt_tx_id"] = duplicate_receipt_tx_id
+        # 3. Hitung Konsumsi BBM Riil
+        distance = float(tx_dict['odometer']) - float(last_odo)
+        fuel_amount = float(tx_dict['fuel_amount'])
 
-        # 2. Input Validation
-        validate_transaction_data(tx_dict)
+        # Hindari pembagian dengan nol
+        real_consumption = distance / fuel_amount if fuel_amount > 0 else 0
+        target_rate = float(tx_dict['target_rate'] or 0)
 
-        # 3. OCR — Mengambil foto dari URL Supabase Storage
-        receipt_url = tx_dict.get("receipt_photo_path")
-        odo_before_url = tx_dict.get("odometer_photo_path")
-        odo_after_url = tx_dict.get("odometer_after_photo_path")
+        # Tentukan Status Anomali (Jika konsumsi lebih boros/kecil dari target km/liter)
+        is_anomaly = real_consumption < target_rate and distance > 0
+        status_label = "ANOMALI" if is_anomaly else "NORMAL"
 
-        print(f"[Python Inference] Memulai OCR Nota...", flush=True)
-        ocr_receipt = read_receipt(receipt_url)
+        notes = f"Jarak: {distance} km | Konsumsi: {real_consumption:.2f} km/l | Target: {target_rate} km/l"
+        if is_anomaly:
+            notes = f"[BOROS] {notes}"
 
-        print(f"[Python Inference] Memulai OCR Odo Sebelum...", flush=True)
-        ocr_odo_before = read_odometer(odo_before_url)
+        # 4. Simpan hasil ke database Supabase
+        cursor.execute("""
+            UPDATE fuel_transactions
+            SET ml_is_anomaly = %s,
+                ml_anomaly_score = %s,
+                real_fuel_consumption = %s,
+                notes = %s,
+                status = %s,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = %s
+        """, (
+            is_anomaly,
+            1.0 if is_anomaly else 0.0,
+            real_consumption,
+            notes,
+            "REVIEW" if is_anomaly else "COMPLETED",
+            transaction_id
+        ))
+        connection.commit()
 
-        print(f"[Python Inference] Memulai OCR Odo Sesudah...", flush=True)
-        ocr_odo_after = read_odometer(odo_after_url)
+        # 5. Kirim WhatsApp jika Anomali
+        result = {
+            "is_anomaly": is_anomaly,
+            "anomaly_score": 1.0 if is_anomaly else 0.0,
+            "notes": notes,
+            "transaction_full": tx_dict
+        }
 
-        print(f"[Python Inference] Hasil OCR - Nota: {ocr_receipt}, OdoBefore: {ocr_odo_before}, OdoAfter: {ocr_odo_after}", flush=True)
+        if is_anomaly:
+            print(f"[ML Engine] Anomali terdeteksi! Mengirim WA ke Admin dan Driver...")
+            send_anomaly_notification(tx_dict, result)
 
-        # Tambahkan hasil OCR ke tx_dict untuk diolah feature_service
-        tx_dict["ocr_liters"] = ocr_receipt.get("liters") if ocr_receipt else None
-        tx_dict["ocr_total_cost"] = ocr_receipt.get("total_cost") if ocr_receipt else None
-        tx_dict["ocr_fuel_type"] = ocr_receipt.get("fuel_type") if ocr_receipt else None
-        tx_dict["ocr_odometer_before"] = ocr_odo_before
-        tx_dict["ocr_odometer_after"] = ocr_odo_after
-
-        # 4. Feature Engineering
-        print(f"[Python Inference] Ekstraksi fitur...", flush=True)
-        features = extract_features(tx_dict)
-
-        # 5. Data Preprocessing
-        print(f"[Python Inference] Preprocessing...", flush=True)
-        preprocessed = preprocess_features(features)
-
-        # 6. Rule Engine Evaluation
-        print(f"[Python Inference] Menjalankan Rule Engine...", flush=True)
-        inference_result = evaluate_transaction_rules(preprocessed)
-
-        # Simpan hasil OCR ke database Supabase
-        try:
-            import json
-            cursor.execute("""
-                UPDATE fuel_transactions
-                SET ocr_receipt_data = %s,
-                    ocr_odometer_before = %s,
-                    ocr_odometer_after = %s,
-                    ml_is_anomaly = %s,
-                    ml_anomaly_score = %s,
-                    ml_anomaly_reasons = %s,
-                    notes = %s,
-                    status = %s
-                WHERE id = %s
-            """, (
-                json.dumps(ocr_receipt) if ocr_receipt else None,
-                ocr_odo_before,
-                ocr_odo_after,
-                inference_result["is_anomaly"],
-                inference_result["anomaly_score"],
-                inference_result["notes"],
-                inference_result["notes"],
-                "REVIEW" if inference_result["is_anomaly"] else "COMPLETED",
-                transaction_id
-            ))
-            connection.commit()
-            print(f"[Python Inference] Database updated for Transaction ID {transaction_id}")
-        except Exception as db_err:
-            print(f"[Python Inference DB Error] {db_err}")
-
-        # Tambahkan data transaksi lengkap ke result agar fuel_worker bisa kirim WA
-        inference_result["transaction_full"] = tx_dict
-        inference_result["ocr_receipt_data"] = ocr_receipt
-        inference_result["ocr_odo_before"] = ocr_odo_before
-        inference_result["ocr_odo_after"] = ocr_odo_after
-
-        print(f"[Python Inference] Berhasil menyelesaikan analisis untuk Transaction ID {transaction_id}.")
-        return inference_result
+        return result
 
     except Exception as e:
-        print(f"[Python Inference Error] Gagal memproses Transaction ID {transaction_id}: {e}")
+        if connection: connection.rollback()
+        print(f"[ML Error] {e}")
         raise e
     finally:
-        if cursor:
-            cursor.close()
-        if connection:
-            connection.close()
+        if cursor: cursor.close()
+        if connection: connection.close()
