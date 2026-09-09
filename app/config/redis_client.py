@@ -21,11 +21,15 @@ def get_redis_client():
             # 1. Bersihkan dari tanda kutip jika ada (penting di Railway/Render)
             redis_url = redis_url.strip('"').strip("'")
 
-            # 2. Pastikan URL memiliki skema rediss:// untuk SSL Upstash
+            # 2. Upgrade ke rediss:// untuk TLS (Upstash) jika belum
+            if redis_url.startswith("redis://") and "upstash.io" in redis_url:
+                redis_url = redis_url.replace("redis://", "rediss://")
+
+            # 3. Pastikan URL memiliki skema rediss:// untuk SSL Upstash
             if not redis_url.startswith(("redis://", "rediss://", "unix://")):
                 redis_url = f"rediss://{redis_url}"
 
-            print(f"[Python Redis] Mencoba terhubung ke host: {redis_url.split('@')[-1]}")
+            print(f"[Python Redis] Connecting to host: {redis_url.split('@')[-1]}")
 
             client = redis.from_url(
                 redis_url,
