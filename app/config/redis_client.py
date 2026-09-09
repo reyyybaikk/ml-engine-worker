@@ -18,24 +18,23 @@ def get_redis_client():
         redis_url = os.getenv("REDIS_URL")
 
         if redis_url:
-            # Pastikan URL memiliki skema redis:// agar tidak ValueError
-            if not redis_url.startswith(("redis://", "rediss://", "unix://")):
-                print(f"[Python Redis] WARNING: REDIS_URL tidak memiliki skema. Menambahkan awalan 'redis://'")
-                redis_url = f"redis://{redis_url}"
+            # 1. Bersihkan dari tanda kutip jika ada (penting di Railway/Render)
+            redis_url = redis_url.strip('"').strip("'")
 
-            print(f"[Python Redis] Menghubungkan menggunakan REDIS_URL...")
+            # 2. Pastikan URL memiliki skema rediss:// untuk SSL Upstash
+            if not redis_url.startswith(("redis://", "rediss://", "unix://")):
+                redis_url = f"rediss://{redis_url}"
+
+            print(f"[Python Redis] Mencoba terhubung ke host: {redis_url.split('@')[-1]}")
+
             client = redis.from_url(
                 redis_url,
                 decode_responses=True,
                 retry_on_timeout=True,
                 health_check_interval=30,
                 socket_connect_timeout=10,
-                socket_keepalive=True
+                ssl_cert_reqs=None
             )
-            # Log untuk verifikasi host (tanpa password untuk keamanan)
-            from urllib.parse import urlparse
-            parsed_url = urlparse(redis_url)
-            print(f"[Python Redis] Terhubung ke host: {parsed_url.hostname}")
         else:
             print(f"[Python Redis] WARNING: REDIS_URL tidak ditemukan. Menggunakan fallback {REDIS_HOST}:{REDIS_PORT}")
             client = redis.Redis(

@@ -60,14 +60,17 @@ def start_worker():
         try:
             # Heartbeat setiap 30 detik (lebih sering agar kita tahu worker hidup)
             if time.time() - last_heartbeat > 30:
-                print(f"[Python Worker] Heartbeat: Masih memantau antrean 'fuel_queue'...", flush=True)
+                print(f"[Python Worker] Heartbeat: Menunggu di antrean 'fuel_queue' (Status Redis: {redis_client.ping()})...", flush=True)
                 last_heartbeat = time.time()
 
-            result = redis_client.brpop("fuel_queue", timeout=20)
+            result = redis_client.brpop("fuel_queue", timeout=10)
             
             if result:
                 queue_name, raw_data = result
-                print(f"[Python Worker] Raw data diterima dari Redis: {raw_data}", flush=True)
+                print(f"[Python Worker] 📥 RAW DATA DITERIMA: {raw_data}", flush=True)
+
+                job_payload = json.loads(raw_data)
+                transaction_id = job_payload.get("transactionId")
 
                 job_payload = json.loads(raw_data)
                 transaction_id = job_payload.get("transactionId")
