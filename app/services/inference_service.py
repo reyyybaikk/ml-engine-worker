@@ -15,7 +15,7 @@ def run_inference_for_transaction(transaction_id: int) -> dict:
         connection = get_db_connection()
         cursor = connection.cursor()
 
-        # 1. Ambil data transaksi saat ini
+        # 1. Ambil data transaksi saat ini dan data kendaraan terkait
         query_current = """
             SELECT 
                 ft.*,
@@ -32,7 +32,7 @@ def run_inference_for_transaction(transaction_id: int) -> dict:
         if not tx_dict:
             raise ValueError(f"Transaction ID {transaction_id} tidak ditemukan.")
 
-        # 2. Ambil Stand Odo dari transaksi SEBELUMNYA (Last Filling)
+        # 2. Ambil Stand Odo dari transaksi SEBELUMNYA untuk menghitung efisiensi (Baseline)
         query_prev = """
             SELECT odometer FROM fuel_transactions
             WHERE vehicle_id = %s AND id < %s
@@ -40,26 +40,39 @@ def run_inference_for_transaction(transaction_id: int) -> dict:
         """
         cursor.execute(query_prev, (tx_dict['vehicle_id'], transaction_id))
         prev_tx = cursor.fetchone()
+        last_odo = prev_tx['odometer'] if prev_tx else tx_dict['odometer']
 
-        last_odo = prev_tx['odometer'] if prev_tx else tx_dict['odometer'] # Fallback ke odo sekarang jika data pertama
+        # 3. Jalankan Full ML/Rule Pipeline
+        # a. Feature Engineering (Menggabungkan data input & OCR)
+        features = extract_features(tx_dict)
 
-        # 3. Hitung Konsumsi BBM Riil
+        # b. Preprocessing (Normalisasi data)
+        preprocessed = preprocess_features(features)
+
+        # c. Rule Engine Evaluation (Tangki, Harga, OCR Match, Fraud)
+        rule_results = evaluate_transaction_rules(preprocessed)
+
+        # 4. Perhitungan Konsumsi BBM Riil (Baseline Efficiency Rule)
         distance = float(tx_dict['odometer']) - float(last_odo)
         fuel_amount = float(tx_dict['fuel_amount'])
-
-        # Hindari pembagian dengan nol
         real_consumption = distance / fuel_amount if fuel_amount > 0 else 0
         target_rate = float(tx_dict['target_rate'] or 0)
 
-        # Tentukan Status Anomali (Jika konsumsi lebih boros/kecil dari target km/liter)
-        is_anomaly = real_consumption < target_rate and distance > 0
-        status_label = "ANOMALI" if is_anomaly else "NORMAL"
+        # Cek Anomali Efisiensi (Boros)
+        efficiency_anomaly = real_consumption < target_rate and distance > 0
 
-        notes = f"Jarak: {distance} km | Konsumsi: {real_consumption:.2f} km/l | Target: {target_rate} km/l"
-        if is_anomaly:
-            notes = f"[BOROS] {notes}"
+        # 5. Konsolidasi Hasil (Gabungkan Rule Engine + Efficiency Check)
+        is_anomaly = rule_results["is_anomaly"] or efficiency_anomaly
 
-        # 4. Simpan hasil ke database Supabase
+        # Gabungkan catatan
+        final_notes = rule_results["notes"]
+        if efficiency_anomaly:
+            eff_note = f"[Rule: Efisiensi] Konsumsi riil {real_consumption:.2f} km/l < Target {target_rate} km/l."
+            final_notes = f"{eff_note} | {final_notes}" if final_notes != "NORMAL" else eff_note
+
+        anomaly_score = max(rule_results["anomaly_score"], 1.0 if efficiency_anomaly else 0.0)
+
+        # 6. Simpan hasil akhir ke database
         cursor.execute("""
             UPDATE fuel_transactions
             SET ml_is_anomaly = %s,
@@ -71,24 +84,24 @@ def run_inference_for_transaction(transaction_id: int) -> dict:
             WHERE id = %s
         """, (
             is_anomaly,
-            1.0 if is_anomaly else 0.0,
+            anomaly_score,
             real_consumption,
-            notes,
+            final_notes,
             "REVIEW" if is_anomaly else "COMPLETED",
             transaction_id
         ))
         connection.commit()
 
-        # 5. Kirim WhatsApp jika Anomali
+        # 7. Siapkan Response & Kirim Notifikasi jika Anomali
         result = {
             "is_anomaly": is_anomaly,
-            "anomaly_score": 1.0 if is_anomaly else 0.0,
-            "notes": notes,
+            "anomaly_score": anomaly_score,
+            "notes": final_notes,
             "transaction_full": tx_dict
         }
 
         if is_anomaly:
-            print(f"[ML Engine] Anomali terdeteksi! Mengirim WA ke Admin dan Driver...")
+            print(f"[ML Engine] ANOMALI KRITIS TERDETEKSI pada TX #{transaction_id}!")
             send_anomaly_notification(tx_dict, result)
 
         return result
