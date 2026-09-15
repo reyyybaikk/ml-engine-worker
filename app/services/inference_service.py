@@ -16,6 +16,7 @@ def run_inference_for_transaction(transaction_id: int) -> dict:
         cursor = connection.cursor()
 
         # 1. Ambil data transaksi, data kendaraan, dan KONTAK ADMIN WILAYAH
+        # Menggunakan pencarian fleksibel agar 'UL BANJARMASIN' cocok dengan 'Banjarmasin'
         query_current = """
             SELECT 
                 ft.*,
@@ -25,7 +26,8 @@ def run_inference_for_transaction(transaction_id: int) -> dict:
             FROM fuel_transactions ft
             JOIN vehicles v ON ft.vehicle_id = v.id
             JOIN users u ON ft.driver_id = u.id
-            LEFT JOIN region_contacts rc ON v.ul_nd = rc.ul_nd
+            LEFT JOIN region_contacts rc ON
+                LOWER(REPLACE(v.ul_nd, 'UL ', '')) = LOWER(REPLACE(rc.ul_nd, 'UL ', ''))
             WHERE ft.id = %s;
         """
         cursor.execute(query_current, (transaction_id,))
@@ -96,6 +98,7 @@ def run_inference_for_transaction(transaction_id: int) -> dict:
 
         # 7. Siapkan Response & Kirim Notifikasi jika Anomali
         result = {
+            "transaction_id": transaction_id,
             "is_anomaly": is_anomaly,
             "anomaly_score": anomaly_score,
             "notes": final_notes,
