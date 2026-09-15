@@ -13,7 +13,7 @@ WA_SUPER_ADMIN_PHONE = os.getenv("WA_ADMIN_PHONE", "") # Fallback jika admin wil
 def send_anomaly_notification(transaction: dict, inference_result: dict) -> bool:
     """
     Mengirim notifikasi WhatsApp ke Admin Wilayah (berdasarkan UL)
-    DAN Driver jika anomali terdeteksi.
+    jika anomali terdeteksi.
     """
     if not WA_DEVICE_ID:
         print("[WA] WHACenter Device ID belum ada di .env.")
@@ -31,14 +31,7 @@ def send_anomaly_notification(transaction: dict, inference_result: dict) -> bool
     else:
         print("[WA Warning] Tidak ada nomor Admin Wilayah maupun Super Admin untuk dikirimi notifikasi.")
 
-    # 2. Kirim ke Driver
-    driver_phone = transaction.get("driver_whatsapp")
-    driver_success = False
-    if driver_phone:
-        driver_message = f"Halo *{transaction.get('driver_name')}*,\n\nTerdeteksi pemborosan penggunaan BBM pada kendaraan {transaction.get('license_plate')}.\n\n{inference_result.get('notes')}\n\nMohon gunakan BBM secara bijak sesuai standar perusahaan."
-        driver_success = _send_to_target(driver_phone, driver_message)
-
-    return admin_success or driver_success
+    return admin_success
 
 def _send_to_target(target: str, message: str) -> bool:
     """
