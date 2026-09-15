@@ -8,12 +8,12 @@ load_dotenv()
 # Konfigurasi WHACenter (WhatsApp Gateway Berbayar)
 WHACENTER_API_URL = "https://app.whacenter.com/api/send"
 WA_DEVICE_ID = os.getenv("WA_DEVICE_ID", "")
-WA_ADMIN_PHONE = os.getenv("WA_ADMIN_PHONE", "")
+WA_SUPER_ADMIN_PHONE = os.getenv("WA_ADMIN_PHONE", "") # Fallback jika admin wilayah tidak ada
 
 def send_anomaly_notification(transaction: dict, inference_result: dict) -> bool:
     """
-    Mengirim notifikasi WhatsApp ke Admin DAN Driver jika anomali terdeteksi
-    menggunakan layanan WHACenter.
+    Mengirim notifikasi WhatsApp ke Admin Wilayah (berdasarkan UL)
+    DAN Driver jika anomali terdeteksi.
     """
     if not WA_DEVICE_ID:
         print("[WA] WHACenter Device ID belum ada di .env.")
@@ -21,8 +21,15 @@ def send_anomaly_notification(transaction: dict, inference_result: dict) -> bool
 
     message = _format_anomaly_message(transaction, inference_result)
 
-    # 1. Kirim ke Admin
-    admin_success = _send_to_target(WA_ADMIN_PHONE, message)
+    # 1. Tentukan Target Admin (Utamakan Admin Wilayah / UL)
+    admin_target = transaction.get("regional_admin_phone") or WA_SUPER_ADMIN_PHONE
+
+    admin_success = False
+    if admin_target:
+        print(f"[WA] Mengirim notifikasi ke Admin Wilayah: {admin_target} (UL: {transaction.get('ul_nd')})")
+        admin_success = _send_to_target(admin_target, message)
+    else:
+        print("[WA Warning] Tidak ada nomor Admin Wilayah maupun Super Admin untuk dikirimi notifikasi.")
 
     # 2. Kirim ke Driver
     driver_phone = transaction.get("driver_whatsapp")

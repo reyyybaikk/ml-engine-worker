@@ -15,15 +15,17 @@ def run_inference_for_transaction(transaction_id: int) -> dict:
         connection = get_db_connection()
         cursor = connection.cursor()
 
-        # 1. Ambil data transaksi saat ini dan data kendaraan terkait
+        # 1. Ambil data transaksi, data kendaraan, dan KONTAK ADMIN WILAYAH
         query_current = """
             SELECT 
                 ft.*,
-                v.fuel_tank_capacity, v.fuel_consumption_rate as target_rate, v.license_plate,
-                u.full_name AS driver_name, u.whatsapp_number AS driver_whatsapp
+                v.fuel_tank_capacity, v.fuel_consumption_rate as target_rate, v.license_plate, v.ul_nd,
+                u.full_name AS driver_name, u.whatsapp_number AS driver_whatsapp,
+                rc.admin_whatsapp AS regional_admin_phone
             FROM fuel_transactions ft
             JOIN vehicles v ON ft.vehicle_id = v.id
             JOIN users u ON ft.driver_id = u.id
+            LEFT JOIN region_contacts rc ON v.ul_nd = rc.ul_nd
             WHERE ft.id = %s;
         """
         cursor.execute(query_current, (transaction_id,))
