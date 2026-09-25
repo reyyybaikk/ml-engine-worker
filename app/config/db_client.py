@@ -31,3 +31,4 @@ def get_db_connection():
     except Exception as e:
         print(f"[Python DB Error] Gagal terhubung ke PostgreSQL: {e}")
         raise e
+    #wa
