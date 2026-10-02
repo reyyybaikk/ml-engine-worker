@@ -23,4 +23,4 @@ COPY . .
 
 # Jalankan worker sebagai modul
 # Render akan mendeteksi CMD ini untuk menjalankan service
-CMD ["python", "-m", "app.workers.fuel_worker"]
+CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8000"]

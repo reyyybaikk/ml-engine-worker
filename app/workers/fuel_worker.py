@@ -84,16 +84,14 @@ def start_worker():
                 queue_name, raw_data = result
                 print(f"[Python Worker] 📥 DATA DITERIMA dari {queue_name}: {raw_data}", flush=True)
 
+                # Parse JSON once
                 job_payload = json.loads(raw_data)
 
-                # BullMQ membungkus data di dalam field 'data'
+                # BullMQ may wrap the payload inside a "data" field
                 if isinstance(job_payload, dict) and "data" in job_payload:
                     transaction_id = job_payload["data"].get("transactionId")
                 else:
                     transaction_id = job_payload.get("transactionId")
-
-                job_payload = json.loads(raw_data)
-                transaction_id = job_payload.get("transactionId")
 
                 print(f"\n[Python Worker] 📥 MENERIMA JOB! Transaction ID: {transaction_id}", flush=True)
 
@@ -104,6 +102,9 @@ def start_worker():
                 save_inference_result_to_db(inference_result)
 
                 print(f"[Python Worker] ✅ Job Transaction ID {transaction_id} selesai diproses.", flush=True)
+
+                # Simple rate‑limit: pause briefly to keep request rate under Upstash quota
+                time.sleep(0.2)
 
         except KeyboardInterrupt:
             print("\n[Python Worker] Worker dihentikan.", flush=True)
