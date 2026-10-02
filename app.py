@@ -3,7 +3,13 @@ from pydantic import BaseModel
 import joblib
 import os
 
+
+
 app = FastAPI()
+
+@app.get("/")
+async def root():
+    return {"status": "ok", "message": "ML engine is alive"}
 
 # Load a dummy model (replace with actual model path)
 MODEL_PATH = os.getenv('MODEL_PATH', 'model.pkl')
