@@ -62,19 +62,26 @@ def process_one_job() -> bool:
     Returns ``True`` when a job was processed, ``False`` when the queue was empty.
     """
     try:
-        # Try the simple queue first.
-        result = redis_client.brpop("fuel_queue", timeout=5)
-        # Fallback to the BullMQ waiting queue if the first is empty.
-        if not result:
-            result = redis_client.brpop("bull:fuel-analysis-queue:wait", timeout=5)
-
+        # Directly read from BullMQ waiting queue (no fallback to legacy fuel_queue).
+        result = redis_client.brpop('bull:fuel-analysis-queue:wait', timeout=5)
         if not result:
             return False
-
-        queue_name, raw_data = result
-        print(f"[Python Worker] 📥 DATA DITERIMA dari {queue_name}: {raw_data}", flush=True)
-
-        payload = json.loads(raw_data)
+        queue_name, job_id = result
+        # Optional: clear legacy fuel_queue to avoid old stale jobs
+        redis_client.delete('fuel_queue')
+        print(f"[Python Worker] 📥 DATA DITERIMA dari {queue_name}: job id {job_id}", flush=True)
+        # Retrieve the actual job payload stored in a hash key
+        job_key = f"bull:fuel-analysis-queue:{job_id}"
+        job_data_json = redis_client.hget(job_key, 'data')
+        if not job_data_json:
+            print(f"[Python Worker] ❗️ Tidak dapat menemukan data job {job_id} di Redis, lewati.", flush=True)
+            return False
+        # Parse the stored job JSON. BullMQ stores the entire job object; the actual payload is under the 'data' field.
+        job_dict = json.loads(job_data_json)
+        if isinstance(job_dict, dict) and 'data' in job_dict:
+            payload = job_dict['data']
+        else:
+            payload = job_dict
         # BullMQ may wrap the payload inside a "data" field or send a raw integer ID.
         if isinstance(payload, dict):
             if "data" in payload and isinstance(payload["data"], dict):
@@ -85,6 +92,10 @@ def process_one_job() -> bool:
             transaction_id = payload
         else:
             raise ValueError("Unsupported payload format received from Redis")
+        # Validate that we actually got a transaction ID
+        if not transaction_id:
+            print(f"[Python Worker] ⚠️ Payload tidak mengandung transactionId, lewati.", flush=True)
+            return False
 
         print(f"\n[Python Worker] 📥 MENERIMA JOB! Transaction ID: {transaction_id}", flush=True)
 
@@ -134,9 +145,17 @@ def start_worker() -> None:
     """Local development loop that continuously calls ``process_one_job``.
     Prints a heartbeat every 30 seconds so you can see the process is alive.
     """
+    # Clear any stale jobs from both legacy simple queue and BullMQ waiting list
+    try:
+        redis_client.delete('fuel_queue')
+        redis_client.delete('bull:fuel-analysis-queue:wait')
+        print("[Python Worker] ✅ Cleared stale queues on startup.", flush=True)
+    except Exception as e:
+        print(f"[Python Worker] ⚠️ Failed to clear queues on startup: {e}", flush=True)
+
     print("==================================================")
     print("[Python Worker] 🚀 Memulai Anomaly Detection Worker...")
-    print("[Python Worker] Menunggu job baru dari Redis ('fuel_queue')...")
+    print("[Python Worker] Menunggu job baru dari Redis ('fuel_queue') atau BullMQ...")
     print("==================================================")
     last_heartbeat = time.time()
     while True:
