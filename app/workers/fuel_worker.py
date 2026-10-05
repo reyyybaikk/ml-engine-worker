@@ -75,16 +75,16 @@ def process_one_job() -> bool:
         print(f"[Python Worker] 📥 DATA DITERIMA dari {queue_name}: {raw_data}", flush=True)
 
         payload = json.loads(raw_data)
-# BullMQ may wrap the payload inside a "data" field or send a raw integer ID.
-if isinstance(payload, dict):
-    if "data" in payload and isinstance(payload["data"], dict):
-        transaction_id = payload["data"].get("transactionId")
-    else:
-        transaction_id = payload.get("transactionId")
-elif isinstance(payload, int):
-    transaction_id = payload
-else:
-    raise ValueError("Unsupported payload format received from Redis")
+        # BullMQ may wrap the payload inside a "data" field or send a raw integer ID.
+        if isinstance(payload, dict):
+            if "data" in payload and isinstance(payload["data"], dict):
+                transaction_id = payload["data"].get("transactionId")
+            else:
+                transaction_id = payload.get("transactionId")
+        elif isinstance(payload, int):
+            transaction_id = payload
+        else:
+            raise ValueError("Unsupported payload format received from Redis")
 
         print(f"\n[Python Worker] 📥 MENERIMA JOB! Transaction ID: {transaction_id}", flush=True)
 
