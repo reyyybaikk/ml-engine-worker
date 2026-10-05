@@ -88,9 +88,24 @@ def process_one_job() -> bool:
 
         print(f"\n[Python Worker] 📥 MENERIMA JOB! Transaction ID: {transaction_id}", flush=True)
 
-        inference_result = run_inference_for_transaction(transaction_id)
-        save_inference_result_to_db(inference_result)
-        print(f"[Python Worker] ✅ Job Transaction ID {transaction_id} selesai diproses.", flush=True)
+        try:
+            inference_result = run_inference_for_transaction(transaction_id)
+        except ValueError as ve:
+            # Transaction not yet available – re‑queue the job for later processing.
+            print(f"[Python Worker] ⚠️ Transaction {transaction_id} belum ada di DB, akan retry...", flush=True)
+            # Push back to the same queue with a small delay (e.g., 5 seconds)
+            time.sleep(5)
+            # Re‑push the job ID so it can be processed again later.
+            # Using the same raw_data payload to retain original format.
+            redis_client.lpush('fuel_queue', raw_data)
+            return False
+        except Exception as e:
+            # Other unexpected errors – log and abort this job.
+            print(f"[Python Worker] ❗️ Gagal proses transaction {transaction_id}: {e}", flush=True)
+            return False
+        else:
+            save_inference_result_to_db(inference_result)
+            print(f"[Python Worker] ✅ Job Transaction ID {transaction_id} selesai diproses.", flush=True)
         # Light rate‑limit to respect Upstash quota.
         time.sleep(0.2)
         return True
