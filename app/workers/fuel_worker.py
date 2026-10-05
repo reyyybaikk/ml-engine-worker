@@ -98,6 +98,8 @@ def process_one_job() -> bool:
             # Re‑push the job ID so it can be processed again later.
             # Using the same raw_data payload to retain original format.
             redis_client.lpush('fuel_queue', raw_data)
+            # Additional sleep after re‑queue to give DB time to commit before next attempt
+            time.sleep(5)
             return False
         except Exception as e:
             # Other unexpected errors – log and abort this job.
