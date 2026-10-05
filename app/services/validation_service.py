@@ -40,3 +40,69 @@ def validate_transaction_data(data: dict) -> bool:
 
     print(f"[Python Validation] Data untuk Transaction ID {transaction_id} valid dan aman diproses.")
     return True
+
+# ---------------------------------------------------------------------------
+# Extended validation that checks numeric bounds (min/max) for fuel, cost, odometer.
+# Returns (is_invalid, list_of_anomaly_labels, explanatory_note).
+# ---------------------------------------------------------------------------
+import os
+from typing import List, Tuple
+
+# Nilai ambang dapat disesuaikan lewat .env, bila tidak ada memakai default.
+FUEL_AMOUNT_MIN = float(os.getenv("FUEL_AMOUNT_MIN", 0.1))   # liter
+FUEL_AMOUNT_MAX = float(os.getenv("FUEL_AMOUNT_MAX", 500.0)) # liter
+COST_MIN       = float(os.getenv("TOTAL_COST_MIN", 1000.0))   # IDR
+COST_MAX       = float(os.getenv("TOTAL_COST_MAX", 1000000.0))
+ODOMETER_MIN   = float(os.getenv("ODOMETER_MIN", 0.0))
+ODOMETER_MAX   = float(os.getenv("ODOMETER_MAX", 10000000.0))
+
+def validate_transaction_input(payload: dict) -> Tuple[bool, List[str], str]:
+    """Validate raw transaction fields against configurable bounds.
+    Returns:
+        (is_invalid, anomaly_labels, note)
+    is_invalid – True bila ada pelanggaran.
+    anomaly_labels – daftar label yang akan dimasukkan ke `rule_labels`.
+    note – penjelasan singkat untuk log / notes.
+    """
+    labels: List[str] = []
+    notes: List[str] = []
+
+    # fuel_amount
+    try:
+        fuel = float(payload.get("fuel_amount", 0))
+    except Exception:
+        fuel = 0.0
+    if fuel < FUEL_AMOUNT_MIN:
+        labels.append("ANOMALI_FUEL_TOO_SMALL")
+        notes.append(f"fuel_amount {fuel} < min {FUEL_AMOUNT_MIN}")
+    if fuel > FUEL_AMOUNT_MAX:
+        labels.append("ANOMALI_FUEL_TOO_LARGE")
+        notes.append(f"fuel_amount {fuel} > max {FUEL_AMOUNT_MAX}")
+
+    # total_cost
+    try:
+        cost = float(payload.get("total_cost", 0))
+    except Exception:
+        cost = 0.0
+    if cost < COST_MIN:
+        labels.append("ANOMALI_COST_TOO_SMALL")
+        notes.append(f"total_cost {cost} < min {COST_MIN}")
+    if cost > COST_MAX:
+        labels.append("ANOMALI_COST_TOO_LARGE")
+        notes.append(f"total_cost {cost} > max {COST_MAX}")
+
+    # odometer
+    try:
+        odo = float(payload.get("odometer", 0))
+    except Exception:
+        odo = 0.0
+    if odo < ODOMETER_MIN:
+        labels.append("ANOMALI_ODOMETER_TOO_SMALL")
+        notes.append(f"odometer {odo} < min {ODOMETER_MIN}")
+    if odo > ODOMETER_MAX:
+        labels.append("ANOMALI_ODOMETER_TOO_LARGE")
+        notes.append(f"odometer {odo} > max {ODOMETER_MAX}")
+
+    is_invalid = len(labels) > 0
+    note_str = "; ".join(notes) if notes else ""
+    return is_invalid, labels, note_str
