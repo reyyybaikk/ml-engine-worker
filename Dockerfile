@@ -1,26 +1,28 @@
-# Gunakan image Python berbasis Debian (slim) agar bisa install Tesseract
 FROM python:3.11-slim
 
-# Install Tesseract OCR, dependencies image, dan data bahasa
+# Install OS dependencies (Tesseract OCR, PostgreSQL client libs, build tools)
 RUN apt-get update && apt-get install -y \
     tesseract-ocr \
     tesseract-ocr-ind \
     libtesseract-dev \
     libpq-dev \
     gcc \
-    && apt-get clean \
-    && rm -rf /var/lib/apt/lists/*
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
 
-# Tentukan direktori kerja
 WORKDIR /app
 
-# Copy requirements dan install dependencies
+# Install Python dependencies
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy seluruh source code ml-engine
+# Copy source code (everything in this folder)
 COPY . .
 
-# Jalankan worker sebagai modul
-# Render akan mendeteksi CMD ini untuk menjalankan service
+# Environment defaults – dapat di‑override lewat Railway UI
+ENV PYTHONUNBUFFERED=1 \
+    PORT=8000
+
+EXPOSE 8000
+
+# Jalankan FastAPI dengan uvicorn
 CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8000"]
