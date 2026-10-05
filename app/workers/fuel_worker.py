@@ -89,17 +89,27 @@ def process_one_job() -> bool:
         print(f"\n[Python Worker] 📥 MENERIMA JOB! Transaction ID: {transaction_id}", flush=True)
 
         try:
-            inference_result = run_inference_for_transaction(transaction_id)
-        except ValueError as ve:
-            # Transaction not yet available – re‑queue the job for later processing.
-            print(f"[Python Worker] ⚠️ Transaction {transaction_id} belum ada di DB, akan retry...", flush=True)
-            # Push back to the same queue with a small delay (e.g., 5 seconds)
-            time.sleep(5)
-            # Re‑push the job ID so it can be processed again later.
-            # Using the same raw_data payload to retain original format.
-            redis_client.lpush('fuel_queue', raw_data)
-            # Additional sleep after re‑queue to give DB time to commit before next attempt
-            time.sleep(5)
+            # Try inference, polling if transaction not yet present.
+            max_checks = 12
+            for attempt in range(max_checks):
+                try:
+                    inference_result = run_inference_for_transaction(transaction_id)
+                    break  # success
+                except ValueError:
+                    if attempt < max_checks - 1:
+                        wait_sec = 10
+                        print(f"[Python Worker] ⚠️ Transaction {transaction_id} belum ada di DB, menunggu {wait_sec} detik... (coba {attempt+1}/{max_checks})", flush=True)
+                        time.sleep(wait_sec)
+                    else:
+                        raise  # will be caught by outer except ValueError
+        except ValueError:
+            # After retries still not found – give up on this job to avoid endless loop.
+            print(f"[Python Worker] ⚠️ Transaction {transaction_id} belum ada di DB setelah {max_checks} percobaan, menghentikan job.", flush=True)
+            # No re‑queue; job will be dropped.
+            return False
+        except Exception as e:
+            # Other unexpected errors – log and abort this job.
+            print(f"[Python Worker] ❗️ Gagal proses transaction {transaction_id}: {e}", flush=True)
             return False
         except Exception as e:
             # Other unexpected errors – log and abort this job.
