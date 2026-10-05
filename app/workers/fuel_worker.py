@@ -12,6 +12,10 @@ import redis
 from app.config.redis_client import redis_client
 from app.config.db_client import get_db_connection
 from app.services.inference_service import run_inference_for_transaction
+from fastapi import FastAPI, HTTPException
+import uvicorn
+
+app = FastAPI(title="ML Engine Worker", version="1.0.0")
 
 
 def save_inference_result_to_db(result: dict) -> None:
@@ -120,6 +124,25 @@ def start_worker() -> None:
         except Exception as e:
             print(f"[Python Worker Fatal] {str(e)}", flush=True)
             time.sleep(2)
+
+@app.get("/healthz")
+async def healthz():
+    """Simple health‑check used by Railway or external monitoring."""
+    try:
+        redis_client.ping()
+        return {"status": "ok", "redis": "connected"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/run-job")
+async def run_job(payload: dict):
+    """Trigger a single job manually (debug purpose)."""
+    transaction_id = payload.get("transactionId")
+    if not transaction_id:
+        raise HTTPException(status_code=400, detail="transactionId wajib ada")
+    result = run_inference_for_transaction(int(transaction_id))
+    save_inference_result_to_db(result)
+    return {"status": "processed", "transactionId": transaction_id}
 
 if __name__ == "__main__":
     start_worker()
