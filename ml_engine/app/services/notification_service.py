@@ -6,12 +6,13 @@ from ..config.db_client import get_db_connection
 
 load_dotenv()
 
-FONNTE_API_URL = "https://api.fonnte.com/send"
+FONNTE_API_URL = "https://app.whacenter.com/api/send"
 
 def _load_wa_config():
-    """Return WA configuration (api_key, admin_phone, device_id) from environment at runtime."""
+    """Return WA configuration (admin phone and device ID) from environment.
+    API key is not required for notification on Railway.
+    """
     return (
-        os.getenv("WA_API_KEY", ""),
         os.getenv("WA_ADMIN_PHONE", ""),
         os.getenv("WA_DEVICE_ID", "whacenter"),
     )
