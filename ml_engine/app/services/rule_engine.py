@@ -1,13 +1,7 @@
-# file: app/services/rule_engine.py
-"""Simple rule engine for ML Engine.
-Loads rule definitions from `app/config/rules.yaml` (YAML) and evaluates a
-payload dict (transaction fields) against those rules.
-Returns a list of anomaly labels (empty if no rule matches).
-"""
-
+import os
 import yaml
 import pathlib
-import os
+from decimal import Decimal
 from typing import List, Dict, Any
 
 from ..models.rule import Rule
@@ -19,15 +13,21 @@ if RULES_PATH.exists():
         raw = yaml.safe_load(f) or []
     # Resolve placeholders like "{{PRICE_MIN}}" and cast to numeric if possible
     def _resolve(value):
-        if isinstance(value, str) and value.startswith("{{") and value.endswith("}}"): 
+        if isinstance(value, str) and value.startswith("{{") and value.endswith("}}"):
             env_key = value.strip("{} ")
             env_val = os.getenv(env_key)
             if env_val is not None:
                 try:
-                    return float(env_val)
-                except ValueError:
+                    return Decimal(env_val)
+                except Exception:
                     return env_val
             return value
+        # Try numeric conversion for plain strings
+        if isinstance(value, str):
+            try:
+                return Decimal(value)
+            except Exception:
+                return value
         return value
     processed = []
     for r in raw:
@@ -41,7 +41,6 @@ if RULES_PATH.exists():
     RULES: List[Rule] = [Rule(**r) for r in processed]
 else:
     RULES = []
-# Duplicate rule loading block removed
 
 _operators = {
     ">": lambda a, b: a > b,
@@ -53,14 +52,15 @@ _operators = {
 }
 
 def _coerce(val: Any, target: Any):
-    """Try numeric conversion; fall back to original values for string comparison."""
+    """Convert both sides to Decimal when possible for safe numeric comparison."""
     try:
-        return float(val), float(target)
+        return Decimal(val), Decimal(target)
     except Exception:
+        # Fallback to original values (e.g., strings)
         return val, target
 
 def evaluate_transaction_rules(payload: Dict[str, Any]) -> List[str]:
-    """Return a list of `anomaly_label` strings whose rule matches the payload.
+    """Return a list of anomaly_label strings whose rule matches the payload.
     The payload is expected to be a flat dict where keys correspond to the
     `field` values defined in the rules.
     """
