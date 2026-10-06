@@ -75,8 +75,10 @@ def _send_to_target(target: str, message: str) -> bool:
     if not target:
         return False
     # Load WA configuration at runtime
-    api_key, _, device_id = _load_wa_config()
-    headers = {} if not api_key else {"Authorization": api_key}
+    # Load WA configuration (admin phone not needed here, only device ID)
+    _, device_id = _load_wa_config()
+    headers = {}  # No Authorization header required for Whacenter
+
     try:
         response = requests.post(
             FONNTE_API_URL,
