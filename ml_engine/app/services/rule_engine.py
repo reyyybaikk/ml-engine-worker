@@ -52,12 +52,23 @@ _operators = {
 }
 
 def _coerce(val: Any, target: Any):
-    """Convert both sides to Decimal when possible for safe numeric comparison."""
+    """Convert both sides to Decimal *only* when both are numeric.
+    If either side cannot be parsed as a Decimal, return the original values
+    so that string comparisons (e.g., ==, !=) can still work without raising
+    a ``Decimal`` vs ``str`` TypeError.
+    """
     try:
-        return Decimal(val), Decimal(target)
+        val_dec = Decimal(val)
     except Exception:
-        # Fallback to original values (e.g., strings)
-        return val, target
+        val_dec = None
+    try:
+        target_dec = Decimal(target)
+    except Exception:
+        target_dec = None
+    if val_dec is not None and target_dec is not None:
+        return val_dec, target_dec
+    # Fallback – keep original types
+    return val, target
 
 def evaluate_transaction_rules(payload: Dict[str, Any]) -> List[str]:
     """Return a list of anomaly_label strings whose rule matches the payload.
@@ -71,9 +82,18 @@ def evaluate_transaction_rules(payload: Dict[str, Any]) -> List[str]:
             if cond.field not in payload:
                 ok = False
                 break
+            # Coerce values to Decimal if possible
             val, target = _coerce(payload[cond.field], cond.value)
             op_func = _operators.get(cond.operator)
-            if op_func is None or not op_func(val, target):
+            if op_func is None:
+                ok = False
+                break
+            try:
+                if not op_func(val, target):
+                    ok = False
+                    break
+            except Exception:
+                # Any type error or unexpected issue means condition fails
                 ok = False
                 break
         if ok:
