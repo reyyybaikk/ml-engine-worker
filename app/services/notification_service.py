@@ -73,17 +73,16 @@ def _send_to_target(target: str, message: str) -> bool:
         return False
     # Load device ID at runtime
     _, device_id = _load_wa_config()
-    headers = {}  # No Authorization header required for Whacenter
     try:
+        # Whacenter API expects form-data with device_id, number, and message
+        payload = {
+            "device_id": device_id,
+            "number": target,
+            "message": message,
+        }
         response = requests.post(
             FONNTE_API_URL,
-            headers=headers,
-            json={
-                "target": target,
-                "message": message,
-                "countryCode": "62",
-                "deviceId": device_id,
-            },
+            data=payload,
             timeout=10,
         )
         # Log status and body for troubleshooting
