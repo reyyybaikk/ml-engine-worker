@@ -35,41 +35,36 @@ def _get_region_admin_phone(region_name: str) -> str:
         return ""
 
 def send_anomaly_notification(transaction: dict, inference_result: dict) -> bool:
-    """Send WhatsApp notification to admin (region‑specific) and driver when anomaly detected.
-    The admin phone is resolved in order:
-    1. Region‑specific phone from `region_contact` table (if `region`/`region_name` present).
-    2. Fallback to `WA_ADMIN_PHONE` env variable.
+    """Send WhatsApp notification ONLY to the region-specific admin when anomaly detected.
+    The admin phone is fetched from `region_contacts` table based on the transaction's region.
+    If not found, it falls back to the default WA_ADMIN_PHONE.
     """
     # Load WA configuration (admin phone & device ID) at runtime
-    WA_ADMIN_PHONE, WA_DEVICE_ID = _load_wa_config()
-    # No API key needed for Whacenter; continue without Authorization header
-    # admin phone fallback already handled later
-
+    WA_ADMIN_PHONE, _ = _load_wa_config()
 
     # Resolve admin phone number
     admin_phone = ""
     region = transaction.get("region") or transaction.get("region_name")
+    
     if region:
         admin_phone = _get_region_admin_phone(region)
+        if admin_phone:
+            print(f"[WA Info] Mengirim notifikasi ke Admin Region: {region} ({admin_phone})")
+            
     if not admin_phone:
+        print(f"[WA Info] Admin region '{region}' tidak ada, menggunakan Admin Pusat/Default.")
         admin_phone = WA_ADMIN_PHONE
+
+    if not admin_phone:
+        print("[WA Error] Tidak ada nomor admin yang bisa dihubungi (region maupun default).")
+        return False
 
     message = _format_anomaly_message(transaction, inference_result)
 
-    # 1. Send to Admin (region‑specific if available)
+    # 1. Send ONLY to Admin
     admin_success = _send_to_target(admin_phone, message)
 
-    # 2. Send to Driver (if phone available)
-    driver_phone = transaction.get("driver_whatsapp")
-    driver_success = False
-    if driver_phone:
-        driver_message = (
-            f"Halo *{transaction.get('driver_name', 'Driver')}*,\n\n"
-            f"Terdeteksi pemborosan penggunaan BBM pada kendaraan {transaction.get('license_plate', '-')}.\n\n"
-            f"{inference_result.get('notes', '-')}")
-        driver_success = _send_to_target(driver_phone, driver_message)
-
-    return admin_success or driver_success
+    return admin_success
 
 def _send_to_target(target: str, message: str) -> bool:
     if not target:
