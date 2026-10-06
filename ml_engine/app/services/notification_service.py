@@ -24,9 +24,10 @@ def _get_region_admin_phone(region_name: str) -> str:
     try:
         conn = get_db_connection()
         with conn.cursor() as cur:
+            clean_region = region_name.replace("Unit Layanan ", "").strip()
             cur.execute(
-                "SELECT admin_whatsapp FROM region_contacts WHERE ul_nd = %s LIMIT 1",
-                (region_name,)
+                "SELECT admin_whatsapp FROM region_contacts WHERE ul_nd ILIKE %s LIMIT 1",
+                (f"%{clean_region}%",)
             )
             row = cur.fetchone()
             return row[0] if row else ""

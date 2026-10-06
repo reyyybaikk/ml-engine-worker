@@ -66,6 +66,7 @@ def run_inference_for_transaction(transaction_id: int) -> dict:
             )
             connection.commit()
             result = {
+                "transaction_id": transaction_id,
                 "is_anomaly": True,
                 "anomaly_score": anomaly_score,
                 "notes": notes,
@@ -108,6 +109,7 @@ def run_inference_for_transaction(transaction_id: int) -> dict:
             )
             connection.commit()
             result = {
+                "transaction_id": transaction_id,
                 "is_anomaly": is_anomaly,
                 "anomaly_score": anomaly_score,
                 "notes": notes,
