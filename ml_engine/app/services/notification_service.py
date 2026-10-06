@@ -24,7 +24,7 @@ def _get_region_admin_phone(region_name: str) -> str:
         conn = get_db_connection()
         with conn.cursor() as cur:
             cur.execute(
-                "SELECT admin_whatsapp FROM region_contacts WHERE ul_nd = %s AND is_active = true LIMIT 1",
+                "SELECT admin_whatsapp FROM region_contacts WHERE ul_nd = %s LIMIT 1",
                 (region_name,)
             )
             row = cur.fetchone()
