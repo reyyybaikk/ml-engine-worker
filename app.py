@@ -1,5 +1,8 @@
 from fastapi import FastAPI, HTTPException, Depends, Header
 from pydantic import BaseModel
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.requests import Request
+import re
 import joblib
 import os
 import logging
@@ -12,6 +15,19 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("ml_engine")
 
 app = FastAPI()
+
+# Middleware untuk menormalkan URL double-slash (//validate/ → /validate/)
+class NormalizeSlashMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        # Collapse any repeated slashes in the path to a single slash
+        path = request.scope.get("path", "/")
+        normalized = re.sub(r'/+', '/', path)
+        if normalized != path:
+            request.scope["path"] = normalized
+        return await call_next(request)
+
+app.add_middleware(NormalizeSlashMiddleware)
+
 
 # Root endpoint
 @app.get("/")
