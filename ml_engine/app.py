@@ -85,6 +85,7 @@ async def healthz():
 
 # Validator endpoint – dipanggil backend setelah transaksi dibuat
 @app.get("/validate/{transaction_id}")
+@app.get("//validate/{transaction_id}")
 async def validate_transaction(transaction_id: int, api_key: str = Depends(get_api_key)):
     try:
         load_model()  # pastikan model ter‑load (atau fallback)
