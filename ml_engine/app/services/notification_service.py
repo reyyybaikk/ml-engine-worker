@@ -7,9 +7,14 @@ from ..config.db_client import get_db_connection
 load_dotenv()
 
 FONNTE_API_URL = "https://api.fonnte.com/send"
-WA_API_KEY = os.getenv("WA_API_KEY", "")
-WA_ADMIN_PHONE = os.getenv("WA_ADMIN_PHONE", "")
-WA_DEVICE_ID = os.getenv("WA_DEVICE_ID", "whacenter")  # default device id, can be overridden via env
+
+def _load_wa_config():
+    """Return WA configuration (api_key, admin_phone, device_id) from environment at runtime."""
+    return (
+        os.getenv("WA_API_KEY", ""),
+        os.getenv("WA_ADMIN_PHONE", ""),
+        os.getenv("WA_DEVICE_ID", "whacenter"),
+    )
 
 def _get_region_admin_phone(region_name: str) -> str:
     """Fetch the WhatsApp admin phone for the given region from `region_contact` table.
@@ -35,6 +40,8 @@ def send_anomaly_notification(transaction: dict, inference_result: dict) -> bool
     2. Fallback to `WA_ADMIN_PHONE` env variable.
     """
     # If no API key is set, we can still attempt sending using deviceId only (some APIs allow it).
+    # Load WA configuration at runtime
+    WA_API_KEY, WA_ADMIN_PHONE, WA_DEVICE_ID = _load_wa_config()
     if not WA_API_KEY:
         print("[WA] API Key belum ada, akan tetap kirim menggunakan deviceId.")
         # Continue without Authorization header
@@ -69,15 +76,18 @@ def send_anomaly_notification(transaction: dict, inference_result: dict) -> bool
 def _send_to_target(target: str, message: str) -> bool:
     if not target:
         return False
+    # Load WA configuration at runtime
+    api_key, _, device_id = _load_wa_config()
+    headers = {} if not api_key else {"Authorization": api_key}
     try:
         response = requests.post(
             FONNTE_API_URL,
-            headers={"Authorization": WA_API_KEY},
+            headers=headers,
             data={
                 "target": target,
                 "message": message,
                 "countryCode": "62",
-                "deviceId": WA_DEVICE_ID,
+                "deviceId": device_id,
             },
             timeout=10,
         )
