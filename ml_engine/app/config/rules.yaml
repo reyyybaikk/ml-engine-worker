@@ -1,0 +1,53 @@
+# Aturan‑aturan (rules) untuk deteksi anomali pada transaksi BBM
+# File ini dibaca oleh ml_engine/app/services/rule_engine.py
+# Setiap rule memiliki:
+#   - name: nama rule (untuk log/debug)
+#   - description: penjelasan singkat
+#   - conditions: list kondisi yang harus semua terpenuhi
+#       * field   : nama kolom dalam payload transaksi
+#       * operator: salah satu >, <, >=, <=, ==, !=
+#       * value   : nilai literal atau referensi ke field lain (mis. tank_capacity)
+#   - anomaly_label: label yang akan disimpan di kolom rule_labels (JSON array)
+
+- name: "Fuel amount exceeds tank capacity"
+  description: "Jumlah liter yang di‑isi lebih besar dari kapasitas tangki kendaraan"
+  conditions:
+    - field: fuel_amount
+      operator: ">"
+      value: tank_capacity
+  anomaly_label: "ANOMALI_FUEL_HIGH"
+
+- name: "Cost per liter out of acceptable range"
+  description: "Harga per liter di luar rentang yang diizinkan (di‑set lewat .env)"
+  conditions:
+    - field: cost_per_liter
+      operator: "<"
+      value: "{{PRICE_MIN}}"
+    - field: cost_per_liter
+      operator: ">"
+      value: "{{PRICE_MAX}}"
+  anomaly_label: "ANOMALI_HARGA"
+
+- name: "Large odometer jump"
+  description: "Selisih odometer antara transaksi ini dengan transaksi sebelumnya > 1000 km"
+  conditions:
+    - field: odometer_jump
+      operator: ">"
+      value: 1000
+  anomaly_label: "ANOMALI_ODOMETER_JUMP"
+
+- name: "OCR vs input liter discrepancy > 10%"
+  description: "Selisih persentase liter antara hasil OCR dan input manual lebih besar dari 10 %"
+  conditions:
+    - field: ocr_vs_input_liter_diff
+      operator: ">"
+      value: 0.10
+  anomaly_label: "ANOMALI_OCR_LITER"
+
+- name: "OCR vs input cost discrepancy > 10%"
+  description: "Selisih persentase biaya antara hasil OCR dan input manual lebih besar dari 10 %"
+  conditions:
+    - field: ocr_vs_input_cost_diff
+      operator: ">"
+      value: 0.10
+  anomaly_label: "ANOMALI_OCR_COST"
