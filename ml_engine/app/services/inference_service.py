@@ -21,7 +21,7 @@ def run_inference_for_transaction(transaction_id: int) -> dict:
         query_current = """
             SELECT 
                 ft.*, 
-                v.fuel_tank_capacity, v.fuel_consumption_rate as target_rate, v.license_plate, 
+                v.fuel_tank_capacity, v.fuel_consumption_rate as target_rate, v.license_plate, v.ul_nd AS region_name, 
                 u.full_name AS driver_name, u.whatsapp_number AS driver_whatsapp 
             FROM fuel_transactions ft 
             JOIN vehicles v ON ft.vehicle_id = v.id 
@@ -165,6 +165,7 @@ def run_inference_for_transaction(transaction_id: int) -> dict:
         connection.commit()
 
         result = {
+            "transaction_id": transaction_id,
             "is_anomaly": is_anomaly,
             "anomaly_score": 1.0 if is_anomaly else 0.0,
             "notes": notes,
