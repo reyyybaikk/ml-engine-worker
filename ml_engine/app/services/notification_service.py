@@ -9,8 +9,8 @@ load_dotenv()
 FONNTE_API_URL = "https://app.whacenter.com/api/send"
 
 def _load_wa_config():
-    """Return WA configuration (admin phone and device ID) from environment.
-    API key is not required for notification on Railway.
+    """Return WA configuration (admin phone, device ID) from environment.
+    API key is not used.
     """
     return (
         os.getenv("WA_ADMIN_PHONE", ""),
@@ -40,13 +40,10 @@ def send_anomaly_notification(transaction: dict, inference_result: dict) -> bool
     1. Region‑specific phone from `region_contact` table (if `region`/`region_name` present).
     2. Fallback to `WA_ADMIN_PHONE` env variable.
     """
-    # If no API key is set, we can still attempt sending using deviceId only (some APIs allow it).
-    # Load WA configuration at runtime
-    WA_API_KEY, WA_ADMIN_PHONE, WA_DEVICE_ID = _load_wa_config()
-    if not WA_API_KEY:
-        print("[WA] API Key belum ada, akan tetap kirim menggunakan deviceId.")
-        # Continue without Authorization header
-        # Note: This may fail if the API requires the key.
+    # Load WA configuration (admin phone & device ID) at runtime
+    WA_ADMIN_PHONE, WA_DEVICE_ID = _load_wa_config()
+    # No API key needed for Whacenter; continue without Authorization header
+    # admin phone fallback already handled later
 
 
     # Resolve admin phone number
@@ -84,7 +81,7 @@ def _send_to_target(target: str, message: str) -> bool:
         response = requests.post(
             FONNTE_API_URL,
             headers=headers,
-            data={
+            json={
                 "target": target,
                 "message": message,
                 "countryCode": "62",
@@ -92,6 +89,10 @@ def _send_to_target(target: str, message: str) -> bool:
             },
             timeout=10,
         )
+        # Log status and body for troubleshooting
+        print(f"[WA Debug] Sent to {target}, status={response.status_code}, body={response.text[:200]}")
+        if response.status_code != 200:
+            print(f"[WA Error] Gagal kirim ke {target}: status {response.status_code}, response={response.text}")
         return response.status_code == 200
     except Exception as e:
         print(f"[WA Error] Gagal kirim ke {target}: {e}")
