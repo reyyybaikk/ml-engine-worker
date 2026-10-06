@@ -86,6 +86,31 @@ def validate_transaction_input(payload: dict) -> Tuple[bool, List[str], str]:
     except Exception:
         odo = Decimal(0)
 
+    # ----- bound checks -----
+    if fuel < FUEL_AMOUNT_MIN:
+        labels.append("ANOMALI_FUEL_TOO_SMALL")
+        notes.append(f"fuel_amount {fuel} < min {FUEL_AMOUNT_MIN}")
+
+    if fuel > FUEL_AMOUNT_MAX:
+        labels.append("ANOMALI_FUEL_TOO_LARGE")
+        notes.append(f"fuel_amount {fuel} > max {FUEL_AMOUNT_MAX}")
+
+    if cost < COST_MIN:
+        labels.append("ANOMALI_COST_TOO_SMALL")
+        notes.append(f"total_cost {cost} < min {COST_MIN}")
+
+    if cost > COST_MAX:
+        labels.append("ANOMALI_COST_TOO_LARGE")
+        notes.append(f"total_cost {cost} > max {COST_MAX}")
+
+    if odo < ODOMETER_MIN:
+        labels.append("ANOMALI_ODOMETER_TOO_SMALL")
+        notes.append(f"odometer {odo} < min {ODOMETER_MIN}")
+
+    if odo > ODOMETER_MAX:
+        labels.append("ANOMALI_ODOMETER_TOO_LARGE")
+        notes.append(f"odometer {odo} > max {ODOMETER_MAX}")
+
     is_invalid = len(labels) > 0
     note_str = "; ".join(notes) if notes else ""
     return is_invalid, labels, note_str
