@@ -6,7 +6,7 @@ from ..config.db_client import get_db_connection
 
 load_dotenv()
 
-FONNTE_API_URL = "https://app.whacenter.com/api/send"
+WHACENTER_URL = "https://app.whacenter.com/api/send"
 
 def _load_wa_config():
     """Return WA configuration (admin phone, device ID) from environment.
