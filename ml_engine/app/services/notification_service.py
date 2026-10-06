@@ -30,7 +30,9 @@ def _get_region_admin_phone(region_name: str) -> str:
                 (f"%{clean_region}%",)
             )
             row = cur.fetchone()
-            return row[0] if row else ""
+            if row:
+                return row.get("admin_whatsapp", "") if isinstance(row, dict) else row[0]
+            return ""
     except Exception as e:
         print(f"[DB Error] Gagal ambil admin WA untuk region {region_name}: {e}")
         return ""
