@@ -181,7 +181,9 @@ def run_inference_for_transaction(transaction_id: int) -> dict:
     except Exception as e:
         if connection:
             connection.rollback()
+        import traceback
         print(f"[ML Error] {e}")
+        traceback.print_exc()
         raise e
     finally:
         if cursor:
