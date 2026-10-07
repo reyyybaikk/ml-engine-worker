@@ -59,7 +59,8 @@ def get_api_key(x_api_key: str = Header(None)):
         raise HTTPException(status_code=401, detail="Unauthorized")
     return x_api_key
 
-# Health‑check endpoint
+# Health‑check endpoint (SnapDeploy checks /health, /healthz, /)
+@app.get("/health")
 @app.get("/healthz")
 async def healthz():
     status = {"ml_engine": "up"}
