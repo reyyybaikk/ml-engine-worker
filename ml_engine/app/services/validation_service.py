@@ -46,16 +46,25 @@ def validate_transaction_data(data: dict) -> bool:
 # Returns (is_invalid, list_of_anomaly_labels, explanatory_note).
 # ---------------------------------------------------------------------------
 import os
-from decimal import Decimal
 from typing import List, Tuple
 
+
+def _env_float(key: str, default: str) -> float:
+    """Ambil environment variable dan konversi ke float secara aman."""
+    try:
+        return float(os.getenv(key, default))
+    except (ValueError, TypeError):
+        return float(default)
+
+
 # Nilai ambang dapat disesuaikan lewat .env, bila tidak ada memakai default.
-FUEL_AMOUNT_MIN = Decimal(os.getenv("FUEL_AMOUNT_MIN", "0.1"))   # liter
-FUEL_AMOUNT_MAX = Decimal(os.getenv("FUEL_AMOUNT_MAX", "500.0")) # liter
-COST_MIN       = Decimal(os.getenv("TOTAL_COST_MIN", "1000"))   # IDR
-COST_MAX       = Decimal(os.getenv("TOTAL_COST_MAX", "1000000"))
-ODOMETER_MIN   = Decimal(os.getenv("ODOMETER_MIN", "0"))
-ODOMETER_MAX   = Decimal(os.getenv("ODOMETER_MAX", "10000000"))
+FUEL_AMOUNT_MIN = _env_float("FUEL_AMOUNT_MIN", "0.1")    # liter
+FUEL_AMOUNT_MAX = _env_float("FUEL_AMOUNT_MAX", "500.0")   # liter
+COST_MIN        = _env_float("TOTAL_COST_MIN", "1000")     # IDR
+COST_MAX        = _env_float("TOTAL_COST_MAX", "1000000")
+ODOMETER_MIN    = _env_float("ODOMETER_MIN", "0")
+ODOMETER_MAX    = _env_float("ODOMETER_MAX", "10000000")
+
 
 def validate_transaction_input(payload: dict) -> Tuple[bool, List[str], str]:
     """Validate raw transaction fields against configurable bounds.
@@ -68,23 +77,22 @@ def validate_transaction_input(payload: dict) -> Tuple[bool, List[str], str]:
     labels: List[str] = []
     notes: List[str] = []
 
-    # fuel_amount
+    # Konversi semua nilai ke float agar tidak ada konflik tipe
+    # (decimal.Decimal, str, int, dll.)
     try:
-        fuel = Decimal(float(payload.get("fuel_amount", 0)))
-    except Exception:
-        fuel = Decimal(0)
+        fuel = float(payload.get("fuel_amount") or 0)
+    except (ValueError, TypeError):
+        fuel = 0.0
 
-    # total_cost
     try:
-        cost = Decimal(float(payload.get("total_cost", 0)))
-    except Exception:
-        cost = Decimal(0)
+        cost = float(payload.get("total_cost") or 0)
+    except (ValueError, TypeError):
+        cost = 0.0
 
-    # odometer
     try:
-        odo = Decimal(float(payload.get("odometer", 0)))
-    except Exception:
-        odo = Decimal(0)
+        odo = float(payload.get("odometer") or 0)
+    except (ValueError, TypeError):
+        odo = 0.0
 
     # ----- bound checks -----
     if fuel < FUEL_AMOUNT_MIN:
