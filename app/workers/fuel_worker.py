@@ -67,8 +67,6 @@ def process_one_job() -> bool:
         if not result:
             return False
         queue_name, job_id = result
-        # Optional: clear legacy fuel_queue to avoid old stale jobs
-        redis_client.delete('fuel_queue')
         print(f"[Python Worker] 📥 DATA DITERIMA dari {queue_name}: job id {job_id}", flush=True)
         # Retrieve the actual job payload stored in a hash key
         job_key = f"bull:fuel-analysis-queue:{job_id}"
@@ -132,8 +130,8 @@ def process_one_job() -> bool:
         # Light rate‑limit to respect Upstash quota.
         time.sleep(0.2)
         return True
-    except (redis.exceptions.TimeoutError, redis.exceptions.ConnectionError):
-        # Transient connectivity issue – let the caller decide to retry later.
+    except (redis.exceptions.TimeoutError, redis.exceptions.ConnectionError) as e:
+        print(f"[Python Worker Redis Error] Gagal membaca antrean BullMQ: {e}", flush=True)
         return False
     except Exception as e:
         print(f"[Python Worker Error] Terjadi kesalahan kritis: {str(e)}", flush=True)
@@ -145,17 +143,9 @@ def start_worker() -> None:
     """Local development loop that continuously calls ``process_one_job``.
     Prints a heartbeat every 30 seconds so you can see the process is alive.
     """
-    # Clear any stale jobs from both legacy simple queue and BullMQ waiting list
-    try:
-        redis_client.delete('fuel_queue')
-        redis_client.delete('bull:fuel-analysis-queue:wait')
-        print("[Python Worker] ✅ Cleared stale queues on startup.", flush=True)
-    except Exception as e:
-        print(f"[Python Worker] ⚠️ Failed to clear queues on startup: {e}", flush=True)
-
     print("==================================================")
     print("[Python Worker] 🚀 Memulai Anomaly Detection Worker...")
-    print("[Python Worker] Menunggu job baru dari Redis ('fuel_queue') atau BullMQ...")
+    print("[Python Worker] Menunggu job baru dari antrean BullMQ 'fuel-analysis-queue'...", flush=True)
     print("==================================================")
     last_heartbeat = time.time()
     while True:
