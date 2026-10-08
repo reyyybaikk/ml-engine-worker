@@ -1,4 +1,25 @@
 from app.services.rule_engine import evaluate_transaction_rules
+from decimal import Decimal
+import unittest
+
+
+class RuleEngineRegressionTests(unittest.TestCase):
+    def test_decimal_fuel_amount_resolves_tank_capacity_reference(self):
+        result = evaluate_transaction_rules({
+            "fuel_amount": Decimal("80.00"),
+            "fuel_tank_capacity": Decimal("65.00"),
+        })
+
+        self.assertIn("ANOMALI_FUEL_HIGH", result)
+
+    def test_missing_price_threshold_does_not_raise_type_error(self):
+        result = evaluate_transaction_rules({
+            "fuel_amount": Decimal("40.00"),
+            "fuel_tank_capacity": Decimal("65.00"),
+            "cost_per_liter": Decimal("10000.00"),
+        })
+
+        self.assertIsInstance(result, list)
 
 if __name__ == "__main__":
     print("--- Menguji Rule Engine (Skenario Normal) ---")
