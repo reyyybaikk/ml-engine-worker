@@ -14,19 +14,24 @@
   conditions:
     - field: fuel_amount
       operator: ">"
-      value: tank_capacity
+      value: fuel_tank_capacity
   anomaly_label: "ANOMALI_FUEL_HIGH"
 
-- name: "Cost per liter out of acceptable range"
-  description: "Harga per liter di luar rentang yang diizinkan (di‑set lewat .env)"
+- name: "Cost per liter below acceptable range"
+  description: "Harga per liter di bawah batas yang diizinkan (di‑set lewat .env)"
   conditions:
     - field: cost_per_liter
       operator: "<"
       value: "{{PRICE_MIN}}"
+  anomaly_label: "ANOMALI_HARGA_RENDAH"
+
+- name: "Cost per liter above acceptable range"
+  description: "Harga per liter di atas batas yang diizinkan (di‑set lewat .env)"
+  conditions:
     - field: cost_per_liter
       operator: ">"
       value: "{{PRICE_MAX}}"
-  anomaly_label: "ANOMALI_HARGA"
+  anomaly_label: "ANOMALI_HARGA_TINGGI"
 
 - name: "Large odometer jump"
   description: "Selisih odometer antara transaksi ini dengan transaksi sebelumnya > 1000 km"

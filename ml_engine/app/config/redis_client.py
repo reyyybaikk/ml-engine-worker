@@ -51,13 +51,13 @@ def get_redis_client():
                 socket_keepalive=True
             )
 
-        # Lakukan tes koneksi awal (PING)
-        client.ping()
+        # Jangan melakukan ping saat import. Redis-py membentuk koneksi lazily,
+        # sehingga startup aplikasi tidak gagal saat Redis sedang down.
         return client
-        
+
     except Exception as e:
-        print(f"[Python Redis Error] Gagal terhubung ke server Redis: {e}")
+        print(f"[Python Redis Error] Gagal membuat client Redis: {e}")
         raise e
 
-# Ekspor instance tunggal untuk digunakan di seluruh modul Python
+# Ekspor instance tunggal untuk digunakan di seluruh modul Python.
 redis_client = get_redis_client()

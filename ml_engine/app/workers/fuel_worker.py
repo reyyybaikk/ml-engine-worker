@@ -18,6 +18,27 @@ import uvicorn
 app = FastAPI(title="ML Engine Worker", version="1.0.0")
 
 
+def _normalize_transaction_id(payload):
+    """Normalizes a Redis BullMQ payload into an integer transaction_id."""
+    if isinstance(payload, dict):
+        if "data" in payload and isinstance(payload["data"], dict):
+            payload = payload["data"]
+        for key in ("transactionId", "transaction_id"):
+            if key in payload:
+                payload = payload[key]
+                break
+        else:
+            payload = None
+
+    if payload is None:
+        return None
+
+    try:
+        return int(payload)
+    except (TypeError, ValueError):
+        raise ValueError(f"Unsupported payload format received from Redis: {payload}")
+
+
 def save_inference_result_to_db(result: dict) -> None:
     """Persist inference result back to the ``fuel_transactions`` table.
     The function updates the ``notes`` column with a human‑readable status label
@@ -33,6 +54,9 @@ def save_inference_result_to_db(result: dict) -> None:
         is_anomaly = result.get("is_anomaly")
         anomaly_score = result.get("anomaly_score")
         notes = result.get("notes")
+
+        if transaction_id is None:
+            raise ValueError("Transaction ID tidak ditemukan pada hasil inference")
 
         status_label = "ANOMALI TERDETEKSI" if is_anomaly else "NORMAL"
         updated_notes = f"[{status_label}] Skor: {anomaly_score} | {notes}"
@@ -67,69 +91,52 @@ def process_one_job() -> bool:
         if not result:
             return False
         queue_name, job_id = result
-        # Optional: clear legacy fuel_queue to avoid old stale jobs
         redis_client.delete('fuel_queue')
         print(f"[Python Worker] 📥 DATA DITERIMA dari {queue_name}: job id {job_id}", flush=True)
-        # Retrieve the actual job payload stored in a hash key
+
         job_key = f"bull:fuel-analysis-queue:{job_id}"
         job_data_json = redis_client.hget(job_key, 'data')
         if not job_data_json:
             print(f"[Python Worker] ❗️ Tidak dapat menemukan data job {job_id} di Redis, lewati.", flush=True)
             return False
-        # Parse the stored job JSON. BullMQ stores the entire job object; the actual payload is under the 'data' field.
+
         job_dict = json.loads(job_data_json)
-        if isinstance(job_dict, dict) and 'data' in job_dict:
-            payload = job_dict['data']
-        else:
-            payload = job_dict
-        # BullMQ may wrap the payload inside a "data" field or send a raw integer ID.
-        if isinstance(payload, dict):
-            if "data" in payload and isinstance(payload["data"], dict):
-                transaction_id = payload["data"].get("transactionId")
-            else:
-                transaction_id = payload.get("transactionId")
-        elif isinstance(payload, int):
-            transaction_id = payload
-        else:
-            raise ValueError("Unsupported payload format received from Redis")
-        # Validate that we actually got a transaction ID
-        if not transaction_id:
+        payload = job_dict.get('data', job_dict) if isinstance(job_dict, dict) else job_dict
+
+        try:
+            transaction_id = _normalize_transaction_id(payload)
+        except ValueError:
+            print(f"[Python Worker] ⚠️ Payload tidak valid untuk job {job_id}, lewati.", flush=True)
+            return False
+
+        if transaction_id is None:
             print(f"[Python Worker] ⚠️ Payload tidak mengandung transactionId, lewati.", flush=True)
             return False
 
         print(f"\n[Python Worker] 📥 MENERIMA JOB! Transaction ID: {transaction_id}", flush=True)
 
+        max_checks = 12
         try:
-            # Try inference, polling if transaction not yet present.
-            max_checks = 12
             for attempt in range(max_checks):
                 try:
                     inference_result = run_inference_for_transaction(transaction_id)
-                    break  # success
+                    break
                 except ValueError:
                     if attempt < max_checks - 1:
                         wait_sec = 10
                         print(f"[Python Worker] ⚠️ Transaction {transaction_id} belum ada di DB, menunggu {wait_sec} detik... (coba {attempt+1}/{max_checks})", flush=True)
                         time.sleep(wait_sec)
                     else:
-                        raise  # will be caught by outer except ValueError
+                        raise
         except ValueError:
-            # After retries still not found – give up on this job to avoid endless loop.
             print(f"[Python Worker] ⚠️ Transaction {transaction_id} belum ada di DB setelah {max_checks} percobaan, menghentikan job.", flush=True)
-            # No re‑queue; job will be dropped.
             return False
         except Exception as e:
-            # Other unexpected errors – log and abort this job.
             print(f"[Python Worker] ❗️ Gagal proses transaction {transaction_id}: {e}", flush=True)
             return False
-        except Exception as e:
-            # Other unexpected errors – log and abort this job.
-            print(f"[Python Worker] ❗️ Gagal proses transaction {transaction_id}: {e}", flush=True)
-            return False
-        else:
-            save_inference_result_to_db(inference_result)
-            print(f"[Python Worker] ✅ Job Transaction ID {transaction_id} selesai diproses.", flush=True)
-        # Light rate‑limit to respect Upstash quota.
+
+        save_inference_result_to_db(inference_result)
+        print(f"[Python Worker] ✅ Job Transaction ID {transaction_id} selesai diproses.", flush=True)
         time.sleep(0.2)
         return True
     except (redis.exceptions.TimeoutError, redis.exceptions.ConnectionError):

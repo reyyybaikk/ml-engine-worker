@@ -1,7 +1,7 @@
 import os
 import yaml
 import pathlib
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from typing import List, Dict, Any
 
 from ..models.rule import Rule
@@ -58,12 +58,16 @@ def _coerce(val: Any, target: Any):
     a ``Decimal`` vs ``str`` TypeError.
     """
     try:
-        val_dec = Decimal(val)
-    except Exception:
+        val_dec = Decimal(str(val))
+        if not val_dec.is_finite():
+            val_dec = None
+    except (InvalidOperation, TypeError, ValueError):
         val_dec = None
     try:
-        target_dec = Decimal(target)
-    except Exception:
+        target_dec = Decimal(str(target))
+        if not target_dec.is_finite():
+            target_dec = None
+    except (InvalidOperation, TypeError, ValueError):
         target_dec = None
     if val_dec is not None and target_dec is not None:
         return val_dec, target_dec
@@ -82,17 +86,26 @@ def evaluate_transaction_rules(payload: Dict[str, Any]) -> List[str]:
             if cond.field not in payload:
                 ok = False
                 break
+            target = cond.value
+            if isinstance(target, str) and target in payload:
+                target = payload[target]
+
             # Coerce values to Decimal if possible
-            val, target = _coerce(payload[cond.field], cond.value)
+            val, target = _coerce(payload[cond.field], target)
             op_func = _operators.get(cond.operator)
             if op_func is None:
+                ok = False
+                break
+            if cond.operator in {">", "<", ">=", "<="} and not (
+                isinstance(val, Decimal) and isinstance(target, Decimal)
+            ):
                 ok = False
                 break
             try:
                 if not op_func(val, target):
                     ok = False
                     break
-            except Exception:
+            except (InvalidOperation, TypeError):
                 # Any type error or unexpected issue means condition fails
                 ok = False
                 break
