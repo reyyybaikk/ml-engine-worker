@@ -4,17 +4,17 @@ These Pydantic models are loaded from a YAML/JSON file at runtime.
 """
 
 from pydantic import BaseModel, Field
-from typing import List, Union
+from typing import List, Union, Any, Optional
 
 class Condition(BaseModel):
     """Single condition inside a rule.
     field: nama kolom di data transaksi (mis. "fuel_amount")
     operator: salah satu dari ">", "<", ">=", "<=", "==", "!="
-    value: nilai yang akan dibandingkan, dapat berupa int, float, atau str.
+    value: nilai yang akan dibandingkan, dapat berupa int, float, str, atau None.
     """
     field: str
     operator: str = Field(..., description="Operator comparison")
-    value: Union[int, float, str]
+    value: Optional[Any] = None
 
 class Rule(BaseModel):
     """Sebuah rule yang dapat menandai anomali.

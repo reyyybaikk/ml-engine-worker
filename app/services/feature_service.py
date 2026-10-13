@@ -31,14 +31,14 @@ def extract_features(transaction_data: dict) -> dict:
     if tank_capacity > 0:
         tank_fill_ratio = (fuel_amount / tank_capacity) * 100
 
-    # 3. Cross-validation Nota vs Form Input
+    # 3. Cross-validation Nota vs Form Input (Persentase Selisih Relatif untuk Rule Engine)
     ocr_vs_input_liter_diff = None
     if ocr_liters is not None and fuel_amount > 0:
-        ocr_vs_input_liter_diff = abs(float(ocr_liters) - fuel_amount)
+        ocr_vs_input_liter_diff = abs(float(ocr_liters) - fuel_amount) / fuel_amount
 
     ocr_vs_input_cost_diff = None
     if ocr_total_cost is not None and total_cost > 0:
-        ocr_vs_input_cost_diff = abs(float(ocr_total_cost) - total_cost)
+        ocr_vs_input_cost_diff = abs(float(ocr_total_cost) - total_cost) / total_cost
 
     # 4. Cross-validation Odometer Mesin vs Input Manual
     ocr_vs_input_odo_before_diff = None
@@ -56,9 +56,9 @@ def extract_features(transaction_data: dict) -> dict:
         "fuel_type": fuel_type_input,
         "cost_per_liter": round(cost_per_liter, 2),
         "tank_fill_ratio": round(tank_fill_ratio, 2),
-        # Fitur dari OCR
-        "ocr_vs_input_liter_diff": round(ocr_vs_input_liter_diff, 2) if ocr_vs_input_liter_diff is not None else None,
-        "ocr_vs_input_cost_diff": round(ocr_vs_input_cost_diff, 2) if ocr_vs_input_cost_diff is not None else None,
+        # Fitur dari OCR (Nilai desimal misal 0.15 = 15% selisih)
+        "ocr_vs_input_liter_diff": round(ocr_vs_input_liter_diff, 4) if ocr_vs_input_liter_diff is not None else None,
+        "ocr_vs_input_cost_diff": round(ocr_vs_input_cost_diff, 4) if ocr_vs_input_cost_diff is not None else None,
         "ocr_vs_input_odo_before_diff": ocr_vs_input_odo_before_diff,
         # Data OCR mentah (diteruskan untuk rule engine)
         "ocr_liters": ocr_liters,

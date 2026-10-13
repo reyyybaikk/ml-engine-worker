@@ -56,3 +56,20 @@
       operator: ">"
       value: 0.10
   anomaly_label: "ANOMALI_OCR_COST"
+
+- name: "OCR vs input odometer discrepancy > 50 km"
+  description: "Selisih odometer mesin dashboard hasil OCR dengan input manual driver lebih dari 50 km"
+  conditions:
+    - field: ocr_vs_input_odo_before_diff
+      operator: ">"
+      value: 50
+  anomaly_label: "ANOMALI_OCR_ODOMETER"
+
+- name: "Duplicate receipt hash detected"
+  description: "Foto struk yang diunggah terindikasi duplikat dari transaksi lain (fraud)"
+  conditions:
+    - field: duplicate_receipt_tx_id
+      operator: "!="
+      value: null
+  anomaly_label: "ANOMALI_STRUK_DUPLIKAT"
+

@@ -35,7 +35,64 @@ def run_inference_for_transaction(transaction_id: int) -> dict:
             raise ValueError(f"Transaction ID {transaction_id} tidak ditemukan.")
 
         # -------------------------------------------------
-        # 2. Validasi batas numeric (fuel_amount, total_cost, odometer)
+        # 2. Pemrosesan OCR (Odometer & Struk BBM)
+        # -------------------------------------------------
+        ocr_odo_val = None
+        ocr_receipt_dict = None
+
+        # A. OCR Odometer Dashboard
+        odo_img_source = tx_dict.get('odometer_photo_path') or tx_dict.get('odometer_photo_data')
+        if odo_img_source:
+            try:
+                print(f"[ML Engine] Memulai OCR Odometer dari: {odo_img_source}")
+                ocr_odo_val = read_odometer(odo_img_source)
+                if ocr_odo_val:
+                    print(f"[ML Engine] ✅ OCR Odometer berhasil terdeteksi: {ocr_odo_val} km")
+            except Exception as odo_err:
+                print(f"[ML Engine ⚠️] Gagal proses OCR Odometer: {odo_err}")
+
+        # B. OCR Struk/Nota BBM (SPBU / Eceran)
+        receipt_img_source = tx_dict.get('receipt_photo_path') or tx_dict.get('receipt_photo_data')
+        if receipt_img_source:
+            try:
+                print(f"[ML Engine] Memulai OCR Nota Struk dari: {receipt_img_source}")
+                ocr_receipt_dict = read_receipt(receipt_img_source)
+                if ocr_receipt_dict:
+                    print(f"[ML Engine] ✅ OCR Nota berhasil terdeteksi: {ocr_receipt_dict}")
+            except Exception as receipt_err:
+                print(f"[ML Engine ⚠️] Gagal proses OCR Nota Struk: {receipt_err}")
+
+        # Simpan hasil OCR ke dict transaksi untuk feature extraction & rule evaluation
+        tx_dict['ocr_odometer_before'] = ocr_odo_val
+        tx_dict['ocr_receipt_data'] = ocr_receipt_dict
+        if ocr_receipt_dict:
+            tx_dict['ocr_liters'] = ocr_receipt_dict.get('liters')
+            tx_dict['ocr_total_cost'] = ocr_receipt_dict.get('total_cost')
+            tx_dict['ocr_fuel_type'] = ocr_receipt_dict.get('fuel_type')
+
+        # Persist data OCR ke tabel fuel_transactions
+        try:
+            cursor.execute(
+                """
+                UPDATE fuel_transactions
+                SET ocr_odometer_before = COALESCE(%s, ocr_odometer_before),
+                    ocr_receipt_data = COALESCE(%s, ocr_receipt_data),
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = %s;
+                """,
+                (
+                    ocr_odo_val,
+                    json.dumps(ocr_receipt_dict) if ocr_receipt_dict else None,
+                    transaction_id
+                )
+            )
+            connection.commit()
+        except Exception as ocr_save_err:
+            print(f"[ML Engine ⚠️] Gagal menyimpan hasil OCR ke database: {ocr_save_err}")
+            connection.rollback()
+
+        # -------------------------------------------------
+        # 3. Validasi batas numeric (fuel_amount, total_cost, odometer)
         # -------------------------------------------------
         is_invalid, bound_labels, bound_note = validate_transaction_input(tx_dict)
         if is_invalid:
@@ -78,8 +135,24 @@ def run_inference_for_transaction(transaction_id: int) -> dict:
             return result
 
         # -------------------------------------------------
-        # 3. Rule‑based anomaly detection (sebelum konsumsi)
+        # 4. Feature Extraction & Rule‑based Anomaly Detection
         # -------------------------------------------------
+        # Hitung odometer jump jika ada transaksi sebelumnya
+        query_prev = """
+            SELECT odometer FROM fuel_transactions
+            WHERE vehicle_id = %s AND id < %s
+            ORDER BY id DESC LIMIT 1;
+        """
+        cursor.execute(query_prev, (tx_dict['vehicle_id'], transaction_id))
+        prev_tx = cursor.fetchone()
+        last_odo = prev_tx['odometer'] if prev_tx else tx_dict['odometer']
+        tx_dict['odometer_jump'] = float(tx_dict['odometer']) - float(last_odo)
+
+        # Ekstraksi fitur lengkap (termasuk fitur komparasi OCR)
+        extracted_features = extract_features(tx_dict)
+        # Gabungkan data fitur ke tx_dict untuk evaluasi rule engine
+        tx_dict.update(extracted_features)
+
         rule_labels = evaluate_transaction_rules(tx_dict)
         if rule_labels:
             is_anomaly = True
@@ -121,24 +194,15 @@ def run_inference_for_transaction(transaction_id: int) -> dict:
             return result
 
         # -------------------------------------------------
-        # 4. Jika tidak ada rule, hitung konsumsi BBM riil
+        # 5. Jika lolos aturan, hitung konsumsi BBM riil
         # -------------------------------------------------
-        query_prev = """
-            SELECT odometer FROM fuel_transactions
-            WHERE vehicle_id = %s AND id < %s
-            ORDER BY id DESC LIMIT 1;
-        """
-        cursor.execute(query_prev, (tx_dict['vehicle_id'], transaction_id))
-        prev_tx = cursor.fetchone()
-        last_odo = prev_tx['odometer'] if prev_tx else tx_dict['odometer']
-
         distance = float(tx_dict['odometer']) - float(last_odo)
         fuel_amount = float(tx_dict['fuel_amount'])
         real_consumption = distance / fuel_amount if fuel_amount > 0 else 0
         target_rate = float(tx_dict['target_rate'] or 0)
 
         is_anomaly = real_consumption < target_rate and distance > 0
-        notes = f"Jarak: {distance} km | Konsumsi: {real_consumption:.2f} km/l | Target: {target_rate} km/l"
+        notes = f"Jarak: {distance:.1f} km | Konsumsi: {real_consumption:.2f} km/l | Target: {target_rate} km/l"
         if is_anomaly:
             notes = f"[BOROS] {notes}"
 
@@ -174,7 +238,7 @@ def run_inference_for_transaction(transaction_id: int) -> dict:
             "transaction_full": tx_dict,
         }
         if is_anomaly:
-            print(f"[ML Engine] Anomali terdeteksi! Mengirim WA ke Admin dan Driver...")
+            print(f"[ML Engine] Anomali konsumsi boros terdeteksi! Mengirim WA ke Admin dan Driver...")
             send_anomaly_notification(tx_dict, result)
         return result
 
