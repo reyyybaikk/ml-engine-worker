@@ -103,6 +103,7 @@ def run_inference_for_transaction(transaction_id: int) -> dict:
                 """
                 UPDATE fuel_transactions
                 SET ml_is_anomaly = %s,
+                    is_anomaly = %s,
                     ml_anomaly_score = %s,
                     real_fuel_consumption = %s,
                     notes = %s,
@@ -112,6 +113,7 @@ def run_inference_for_transaction(transaction_id: int) -> dict:
                 WHERE id = %s
                 """,
                 (
+                    is_anomaly,
                     is_anomaly,
                     anomaly_score,
                     0.0,
@@ -162,6 +164,7 @@ def run_inference_for_transaction(transaction_id: int) -> dict:
                 """
                 UPDATE fuel_transactions
                 SET ml_is_anomaly = %s,
+                    is_anomaly = %s,
                     ml_anomaly_score = %s,
                     real_fuel_consumption = %s,
                     notes = %s,
@@ -171,6 +174,7 @@ def run_inference_for_transaction(transaction_id: int) -> dict:
                 WHERE id = %s
                 """,
                 (
+                    is_anomaly,
                     is_anomaly,
                     anomaly_score,
                     0.0,
@@ -210,6 +214,7 @@ def run_inference_for_transaction(transaction_id: int) -> dict:
             """
             UPDATE fuel_transactions
             SET ml_is_anomaly = %s,
+                is_anomaly = %s,
                 ml_anomaly_score = %s,
                 real_fuel_consumption = %s,
                 notes = %s,
@@ -219,6 +224,7 @@ def run_inference_for_transaction(transaction_id: int) -> dict:
             WHERE id = %s
             """,
             (
+                is_anomaly,
                 is_anomaly,
                 1.0 if is_anomaly else 0.0,
                 real_consumption,

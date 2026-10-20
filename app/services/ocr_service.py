@@ -77,7 +77,8 @@ def read_odometer(image_input) -> int | None:
 
 def _parse_odometer_text(text: str) -> int | None:
     """
-    Logika ekstraksi angka odometer dengan normalisasi karakter dan pencarian label.
+    Logika ekstraksi angka odometer dengan normalisasi karakter, pencarian label,
+    dan filtering terhadap watermark lokasi/GPS (seperti kode pos 5 digit).
     """
     if not text:
         return None
@@ -95,16 +96,26 @@ def _parse_odometer_text(text: str) -> int | None:
     }
 
     odo_keywords = ["ODO", "TOTAL", "KM", "KILOMETER", "DISTANCE", "RANGE"]
+    location_keywords = [
+        "JL", "JALAN", "KEC", "KECAMATAN", "KAB", "KABUPATEN", 
+        "KOTA", "PROV", "PROVINSI", "INDONESIA", "DESA", "KELURAHAN",
+        "LAT", "LONG", "ALT", "GPS"
+    ]
 
     for line in lines:
         upper_line = line.upper().strip()
         if not upper_line:
             continue
 
+        # Abaikan baris yang terdeteksi sebagai watermark lokasi/alamat GPS kamera HP
+        is_location_line = any(re.search(rf'\b{re.escape(lk)}\b', upper_line) for lk in location_keywords)
+        if is_location_line:
+            continue
+
         has_odo_kw = any(k in upper_line for k in odo_keywords)
 
         # 1. Cari angka yang langsung mengikuti keyword ODO/KM
-        kw_match = re.search(r'(?:ODO|KM|TOTAL)\s*[:.\-]?\s*(\d{3,7})', upper_line)
+        kw_match = re.search(r'(?:ODO|KM|TOTAL)\s*[:.\-]?\s*(\d{2,7})', upper_line)
         if kw_match:
             cand = int(kw_match.group(1))
             if cand not in [2024, 2025, 2026, 2027]:
@@ -113,8 +124,8 @@ def _parse_odometer_text(text: str) -> int | None:
         # 2. Terapkan normalisasi karakter digital
         normalized = "".join([normalization_map.get(c, c) for c in upper_line])
 
-        # Cari deretan angka 4-7 digit
-        matches = re.findall(r'(\d{4,7})', normalized)
+        # Cari deretan angka 3-7 digit (mendukung odometer mobil/motor mulai dari ribuan)
+        matches = re.findall(r'(\d{3,7})', normalized)
         for match in matches:
             num = int(match)
             if num in [2024, 2025, 2026, 2027]:
@@ -125,10 +136,10 @@ def _parse_odometer_text(text: str) -> int | None:
 
             candidates.append(num)
 
-    # Heuristik: Jika tidak ada label spesifik, ambil angka wajar terbesar (odometer > trip A/B)
+    # Heuristik: Jika tidak ada label spesifik, ambil angka wajar
     if candidates:
-        # Filter nilai odometer wajar (misal 500 s/d 999.999 km)
-        reasonable = [c for c in candidates if 500 <= c <= 999999]
+        # Filter nilai odometer wajar (misal 100 s/d 999.999 km)
+        reasonable = [c for c in candidates if 100 <= c <= 999999]
         if reasonable:
             return max(reasonable)
         return max(candidates)
@@ -158,7 +169,7 @@ def read_receipt(image_input) -> dict | None:
         if not extracted.get('liters') and not extracted.get('total_cost'):
             raw_text_sparse = pytesseract.image_to_string(img, config='--oem 3 --psm 4', lang='ind+eng')
             extracted_sparse = _parse_receipt_text(raw_text_sparse)
-            if extracted_sparse.get('liters') or extracted_sparse.get('total_cost'):
+            if extracted_sparse.get('liters') or extracted_sparse.get('total_cost') or extracted_sparse.get('fuel_type'):
                 extracted = extracted_sparse
 
         print(f"[OCR Receipt] Extracted Result: {extracted}")
@@ -170,7 +181,7 @@ def read_receipt(image_input) -> dict | None:
 
 def _parse_receipt_text(text: str) -> dict:
     """
-    Mem-parsing teks struk BBM dengan regex cerdas untuk SPBU dan Eceran/Kuitansi.
+    Mem-parsing teks struk BBM dengan regex cerdas dan toleran terhadap typo/noise Tesseract.
     """
     result = {
         'liters': None,
@@ -183,34 +194,30 @@ def _parse_receipt_text(text: str) -> dict:
 
     text_lower = text.lower()
 
-    # 1. Fuel Type (Mencakup SPBU & Eceran umum)
+    # 1. Fuel Type (Termasuk variasi typo umum OCR seperti Pertaite, Pertalit, dll)
     fuel_type_map = [
-        ('pertamina dex', 'Pertamina Dex'),
-        ('pertadex', 'Pertamina Dex'),
-        ('pertamax turbo', 'Pertamax Turbo'),
-        ('turbo', 'Pertamax Turbo'),
-        ('dexlite', 'Dexlite'),
-        ('dex', 'Dexlite'),
-        ('biosolar', 'Biosolar'),
-        ('bio solar', 'Biosolar'),
-        ('solar', 'Biosolar'),
-        ('pertamax', 'Pertamax'),
-        ('pertalite', 'Pertalite'),
-        ('premium', 'Premium'),
-        ('bensin', 'Pertalite'),  # Eceran sering menyebut "bensin"
+        (r'\b(pertamina\s*dex|pertadex)\b', 'Pertamina Dex'),
+        (r'\b(pertamax\s*turbo|turbo)\b', 'Pertamax Turbo'),
+        (r'\b(dexlite|dex)\b', 'Dexlite'),
+        (r'\b(biosolar|bio\s*solar|b-solar|biosolr)\b', 'Biosolar'),
+        (r'\b(solar)\b', 'Biosolar'),
+        (r'\b(pertamax|pertamaxx)\b', 'Pertamax'),
+        (r'\b(pertalite|pertaite|pertalit|petalite)\b', 'Pertalite'),
+        (r'\b(premium)\b', 'Premium'),
+        (r'\b(bensin)\b', 'Pertalite'),  # Eceran sering menyebut "bensin"
     ]
-    for keyword, fuel_name in fuel_type_map:
-        if re.search(rf'\b{re.escape(keyword)}\b', text_lower):
+    for pattern, fuel_name in fuel_type_map:
+        if re.search(pattern, text_lower):
             result['fuel_type'] = fuel_name
             break
 
-    # 2. Liters (Mendukung titik, koma, spasi, format SPBU & tulisan Eceran)
+    # 2. Liters (Mendukung titik, koma, spasi, simbol petik ', tanda hubung, dll)
     liter_patterns = [
-        # Contoh: Volume : 25.50 L, Qty: 10,00 Ltr, Jumlah Liter: 15
-        r'(?:volume|vol|jumlah\s*liter|liter|qty|ltr|isi)\s*[:;=\-]?\s*(\d+[.,]\d{1,3})',
+        # Format: "Jumlah liter ' 10", "Volume : 25.50 L", "Jumlah Liter: 15", "Qty: 10,00"
+        r'(?:volume|vol|jumlah\s*liter|liter|qty|ltr|isi)[\s\'":;=\-]*(\d+[.,]\d{1,3})',
         r'(\d+[.,]\d{1,3})\s*(?:[lL](?:iter|tr)?)\b',
-        # Eceran/nota format bulat: "5 liter", "10 ltr", "Vol: 10"
-        r'(?:volume|vol|qty|ltr|liter)\s*[:;=\-]?\s*(\d{1,3})\b',
+        # Format angka bulat: "Jumlah liter ' 10", "Vol: 10", "5 liter"
+        r'(?:volume|vol|jumlah\s*liter|liter|qty|ltr|isi)[\s\'":;=\-]*(\d{1,3})\b',
         r'\b(\d{1,3})\s*(?:liter|ltr|lt)\b',
     ]
     for pattern in liter_patterns:
@@ -225,23 +232,24 @@ def _parse_receipt_text(text: str) -> dict:
             except ValueError:
                 pass
 
-    # 3. Total Cost (SPBU, Eceran, Format Kuitansi: Total, Jumlah Bayar, Rp 50.000)
+    # 3. Total Cost (Format SPBU, Eceran, "Jumlah bei 10.000", "Total Bayar Rp 50.000", dll)
     cost_patterns = [
-        # Contoh: Total Bayar: Rp 250.000, Total : 150000, Grand Total: 75.000
-        r'(?:total\s*(?:biaya|bayar|harga|pembayaran)?|jumlah\s*(?:bayar|rp|uang)?|grand\s*total|tunai|cash|tagihan)\s*[:;=\-]?\s*(?:[Rr][pP]\.?\s*)?([\d.,]{4,})',
-        # Format Rp langsung diikuti nominal besar (>= 4 digit angka): "Rp. 50.000", "Rp100000"
+        # Menangani typo seperti "Jumlah bei", "Jumlah beli", "Total bayar", "Grand Total"
+        r'(?:total\s*(?:biaya|bayar|harga|pembayaran|bei|beli)?|jumlah\s*(?:bayar|rp|uang|bei|beli)?|grand\s*total|tunai|cash|tagihan)[\s\'":;=\-]*(?:[Rr][pP]\.?\s*)?([\d.,]{3,})',
+        # Format Rp langsung: "Rp. 50.000", "Rp100000"
         r'(?:[Rr][pP]\.?\s*)([\d.,]{4,})',
-        # Format "Total: 50000"
-        r'[tT]otal\s*[:;=\-]?\s*([\d.,]{4,})',
+        # Format umum: "Total: 50000"
+        r'[tT]otal[\s\'":;=\-]*([\d.,]{4,})',
     ]
     for pattern in cost_patterns:
         matches = re.finditer(pattern, text, re.IGNORECASE)
         for match in matches:
+            cleaned = match.group(1).strip()
             # Bersihkan tanda baca titik/koma ribuan
-            raw_val = re.sub(r'[^\d]', '', match.group(1))
+            raw_digits = re.sub(r'[^\d]', '', cleaned)
             try:
-                val = float(raw_val)
-                # Filter nominal yang wajar untuk transaksi BBM kendaraan dinas/operasional
+                val = float(raw_digits)
+                # Filter nominal yang wajar untuk transaksi BBM (Rp 5.000 s/d Rp 10.000.000)
                 if 5000 <= val <= 10000000:
                     result['total_cost'] = val
                     break
