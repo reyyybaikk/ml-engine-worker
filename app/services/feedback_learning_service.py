@@ -81,19 +81,26 @@ def load_feedback_calibration() -> Dict[str, Any]:
 
 def should_override_anomaly_by_feedback(tx_dict: dict, rule_labels: list) -> tuple[bool, str]:
     """
-    Mengecek apakah transaksi saat ini memiliki karakteristik yang sebelumnya
-    sudah pernah dikoreksi oleh Admin sebagai transaksi wajar (Self-Correction).
-    Mengembalikan (is_overridden, note_override).
+    Mengecek apakah transaksi saat ini telah dikoreksi oleh Admin sebagai *normal*.
+    - Jika admin menandai `admin_feedback_is_anomaly` = false, semua label anomali yang dihasilkan
+      oleh rule engine akan di‑override, terlepas dari nilai deviasi.
+    - Selain itu, tetap mempertahankan logika toleransi odometer berbasis feedback
+      historis (threshold adaptif).
+    Mengembalikan tuple `(is_overridden, note)`.
     """
-    # Pastikan cache kalibrasi terbaru
+    # 1. Jika admin secara eksplisit menolak anomali, override langsung
+    admin_flag = tx_dict.get("admin_feedback_is_anomaly")
+    if admin_flag is not None and admin_flag is False:
+        return True, "Admin feedback: transaction marked as normal, overriding all anomaly labels."
+
+    # 2. Pastikan cache kalibrasi terbaru untuk tolerant‑threshold logic
     calib = load_feedback_calibration()
 
-    # 1. Pengecekan False Positive Odometer OCR
+    # 3. Pengecekan False Positive Odometer OCR berbasis toleransi adaptif
     if "ANOMALI_OCR_ODOMETER" in rule_labels:
         odo_diff = tx_dict.get("ocr_vs_input_odo_before_diff")
         if odo_diff is not None:
             odo_diff_dec = Decimal(str(odo_diff))
-            # Jika deviasi berada di bawah batas yang telah dipelajari dari feedback admin
             if odo_diff_dec <= calib["odo_diff_threshold"]:
                 return True, f"Auto-corrected: Deviasi OCR odometer ({odo_diff_dec} km) ditoleransi berdasarkan riwayat feedback admin."
 

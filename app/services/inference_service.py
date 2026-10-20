@@ -164,8 +164,12 @@ def run_inference_for_transaction(transaction_id: int) -> dict:
             
             if should_override:
                 print(f"[ML Active Learning] 💡 {override_note} untuk Transaction ID {transaction_id}")
-                # Hapus label yang sudah terkalibrasi normal oleh admin
-                rule_labels = [lbl for lbl in rule_labels if lbl != "ANOMALI_OCR_ODOMETER"]
+                # Jika admin menandai transaksi sebagai normal, hapus semua label anomali
+                if tx_dict.get('admin_feedback_is_anomaly') is False:
+                    rule_labels = []
+                else:
+                    # Hapus hanya label odometer yang telah terkalibrasi
+                    rule_labels = [lbl for lbl in rule_labels if lbl != "ANOMALI_OCR_ODOMETER"]
 
         if rule_labels:
             is_anomaly = True
