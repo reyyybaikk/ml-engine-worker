@@ -24,5 +24,5 @@ ENV PYTHONUNBUFFERED=1 \
 
 EXPOSE 8000
 
-# Jalankan FastAPI dengan uvicorn
-CMD ["sh", "-c", "uvicorn server:app --host 0.0.0.0 --port 8000 & python -m app.workers.fuel_worker"]
+# Jalankan FastAPI dengan uvicorn dan Python worker
+CMD ["sh", "-c", "uvicorn server:app --host 0.0.0.0 --port ${PORT:-8000} & python -m app.workers.fuel_worker"]
