@@ -66,13 +66,16 @@ def read_odometer(image_input, expected_value: int | None = None) -> int | None:
             txt = pytesseract.image_to_string(img_original, config=cfg, lang='eng')
             all_texts.append(txt)
 
+        joined_text = "\n".join(all_texts)
         # Jika belum ada hasil meyakinkan, coba versi landscape
-        val = _parse_odometer_text("\n".join(all_texts), expected_value)
+        val = _parse_odometer_text(joined_text, expected_value)
         if val is None:
             img_land = _preprocess_image(image_input, force_landscape=True)
             txt_land = pytesseract.image_to_string(img_land, config='--oem 3 --psm 6', lang='eng')
+            joined_text += "\n" + txt_land
             val = _parse_odometer_text(txt_land, expected_value)
 
+        print(f"[OCR Odometer Raw Text Sample]:\n{joined_text[:200]}...")
         print(f"[OCR Odometer] Detected Value: {val} (Expected: {expected_value})")
         return val
     except Exception as e:
@@ -139,20 +142,21 @@ def _parse_odometer_text(text: str, expected_value: int | None = None) -> int | 
                 general_candidates.append(num)
 
     # Prioritas 1: Jika ada kandidat dengan label ODO/TOTAL/KM
+    # Filter kandidat berlabel yang realistis (>= 4 digit untuk mobil operasional)
     if candidates_with_label:
-        if expected_value is not None:
-            # Pilih kandidat berlabel yang paling dekat dengan expected_value
-            return min(candidates_with_label, key=lambda c: abs(c - expected_value))
-        return max(candidates_with_label)
+        realistic_labeled = [c for c in candidates_with_label if c >= 1000]
+        if realistic_labeled:
+            if expected_value is not None:
+                return min(realistic_labeled, key=lambda c: abs(c - expected_value))
+            return max(realistic_labeled)
 
-    # Prioritas 2: Jika tidak ada label ODO, gunakan expected_value untuk mencocokkan angka yang paling relevan
+    # Prioritas 2: Gunakan kandidat umum yang memiliki nilai paling masuk akal terhadap expected_value
     if general_candidates:
-        valid_cands = [c for c in general_candidates if 100 <= c <= 999999]
+        valid_cands = [c for c in general_candidates if 1000 <= c <= 999999]
         if valid_cands:
             if expected_value is not None:
-                # Jika ada angka yang selisihnya wajar (< 30% atau < 1000 km dari expected)
                 closest = min(valid_cands, key=lambda c: abs(c - expected_value))
-                if abs(closest - expected_value) <= max(1000, expected_value * 0.3):
+                if abs(closest - expected_value) <= max(2000, expected_value * 0.4):
                     return closest
             return max(valid_cands)
 
@@ -214,7 +218,7 @@ def _parse_receipt_text(text: str) -> dict:
         (r'\b(dexlite|dex)\b', 'Dexlite'),
         (r'\b(biosolar|bio\s*solar|b-solar|biosolr)\b', 'Biosolar'),
         (r'\b(solar)\b', 'Biosolar'),
-        (r'\b(pertamax|pertamaxx)\b', 'Pertamax'),
+        (r'\b(pertamax|pertamaxx|pertamak|pertama)\b', 'Pertamax'),
         (r'\b(pertalite|pertaite|pertalit|petalite)\b', 'Pertalite'),
         (r'\b(premium)\b', 'Premium'),
         (r'\b(bensin)\b', 'Pertalite'),  # Eceran sering menyebut "bensin"

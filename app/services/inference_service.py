@@ -8,6 +8,7 @@ from ..preprocessing.preprocessing_service import preprocess_features
 from .rule_engine import evaluate_transaction_rules
 from .ocr_service import read_odometer, read_receipt
 from .notification_service import send_anomaly_notification
+from .feedback_learning_service import should_override_anomaly_by_feedback
 
 
 def run_inference_for_transaction(transaction_id: int) -> dict:
@@ -157,6 +158,15 @@ def run_inference_for_transaction(transaction_id: int) -> dict:
         tx_dict.update(extracted_features)
 
         rule_labels = evaluate_transaction_rules(tx_dict)
+        if rule_labels:
+            # Evaluasi Active Learning: Apakah anomali ini sudah dipelajari sebagai False Positive wajar oleh Admin?
+            should_override, override_note = should_override_anomaly_by_feedback(tx_dict, rule_labels)
+            
+            if should_override:
+                print(f"[ML Active Learning] 💡 {override_note} untuk Transaction ID {transaction_id}")
+                # Hapus label yang sudah terkalibrasi normal oleh admin
+                rule_labels = [lbl for lbl in rule_labels if lbl != "ANOMALI_OCR_ODOMETER"]
+
         if rule_labels:
             is_anomaly = True
             anomaly_score = 1.0
