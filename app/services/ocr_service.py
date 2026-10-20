@@ -48,43 +48,49 @@ def _preprocess_image(image_input, force_landscape=False) -> Image.Image:
     return img
 
 
-def read_odometer(image_input) -> int | None:
+def read_odometer(image_input, expected_value: int | None = None) -> int | None:
     """
     Membaca angka odometer dari foto dashboard kendaraan.
-    Menerapkan normalisasi karakter digital (S->5, B->8, O->0) dan multi-PSM parsing.
+    Menerapkan multi-PSM parsing dan pembobotan berbasis label ODO serta expected_value (input manual/history).
     """
     if not image_input:
         return None
 
     try:
-        img = _preprocess_image(image_input, force_landscape=True)
-        # Coba PSM 6 (uniform block of text) dan fallback PSM 11 (sparse text) jika perlu
-        config = '--oem 3 --psm 6'
-        raw_text = pytesseract.image_to_string(img, config=config, lang='eng')
+        # Coba orientasi asli terlebih dahulu (karena foto HP biasanya sudah vertikal atau sesuai EXIF)
+        img_original = _preprocess_image(image_input, force_landscape=False)
+        configs = ['--oem 3 --psm 6', '--oem 3 --psm 11', '--oem 3 --psm 4']
+        
+        all_texts = []
+        for cfg in configs:
+            txt = pytesseract.image_to_string(img_original, config=cfg, lang='eng')
+            all_texts.append(txt)
 
-        val = _parse_odometer_text(raw_text)
+        # Jika belum ada hasil meyakinkan, coba versi landscape
+        val = _parse_odometer_text("\n".join(all_texts), expected_value)
         if val is None:
-            config_sparse = '--oem 3 --psm 11'
-            raw_text_sparse = pytesseract.image_to_string(img, config=config_sparse, lang='eng')
-            val = _parse_odometer_text(raw_text_sparse)
+            img_land = _preprocess_image(image_input, force_landscape=True)
+            txt_land = pytesseract.image_to_string(img_land, config='--oem 3 --psm 6', lang='eng')
+            val = _parse_odometer_text(txt_land, expected_value)
 
-        print(f"[OCR Odometer] Detected Value: {val}")
+        print(f"[OCR Odometer] Detected Value: {val} (Expected: {expected_value})")
         return val
     except Exception as e:
         print(f"[OCR Odometer Error] {e}")
         return None
 
 
-def _parse_odometer_text(text: str) -> int | None:
+def _parse_odometer_text(text: str, expected_value: int | None = None) -> int | None:
     """
-    Logika ekstraksi angka odometer dengan normalisasi karakter, pencarian label,
-    dan filtering terhadap watermark lokasi/GPS (seperti kode pos 5 digit).
+    Logika ekstraksi angka odometer dengan normalisasi karakter, deteksi label,
+    serta contextual distance matching jika expected_value diberikan.
     """
     if not text:
         return None
 
     lines = text.split("\n")
-    candidates = []
+    candidates_with_label = []
+    general_candidates = []
 
     normalization_map = {
         'S': '5', 's': '5',
@@ -95,7 +101,7 @@ def _parse_odometer_text(text: str) -> int | None:
         'I': '1', 'l': '1', '|': '1', '!': '1'
     }
 
-    odo_keywords = ["ODO", "TOTAL", "KM", "KILOMETER", "DISTANCE", "RANGE"]
+    odo_keywords = ["ODO", "TOTAL", "KM", "KILOMETER", "DISTANCE"]
     location_keywords = [
         "JL", "JALAN", "KEC", "KECAMATAN", "KAB", "KABUPATEN", 
         "KOTA", "PROV", "PROVINSI", "INDONESIA", "DESA", "KELURAHAN",
@@ -107,42 +113,49 @@ def _parse_odometer_text(text: str) -> int | None:
         if not upper_line:
             continue
 
-        # Abaikan baris yang terdeteksi sebagai watermark lokasi/alamat GPS kamera HP
-        is_location_line = any(re.search(rf'\b{re.escape(lk)}\b', upper_line) for lk in location_keywords)
-        if is_location_line:
+        # Abaikan baris watermark lokasi
+        if any(re.search(rf'\b{re.escape(lk)}\b', upper_line) for lk in location_keywords):
             continue
 
         has_odo_kw = any(k in upper_line for k in odo_keywords)
 
-        # 1. Cari angka yang langsung mengikuti keyword ODO/KM
-        kw_match = re.search(r'(?:ODO|KM|TOTAL)\s*[:.\-]?\s*(\d{2,7})', upper_line)
+        # 1. Cari angka yang sebaris langsung setelah keyword ODO/KM/TOTAL
+        kw_match = re.search(r'(?:ODO|TOTAL|KM)\s*[:.\-]?\s*(\d{2,7})', upper_line)
         if kw_match:
             cand = int(kw_match.group(1))
             if cand not in [2024, 2025, 2026, 2027]:
-                return cand
+                candidates_with_label.append(cand)
 
         # 2. Terapkan normalisasi karakter digital
         normalized = "".join([normalization_map.get(c, c) for c in upper_line])
-
-        # Cari deretan angka 3-7 digit (mendukung odometer mobil/motor mulai dari ribuan)
         matches = re.findall(r'(\d{3,7})', normalized)
         for match in matches:
             num = int(match)
             if num in [2024, 2025, 2026, 2027]:
-                continue # Abaikan tahun kalender
-
+                continue
             if has_odo_kw:
-                return num # Sangat yakin jika sebaris dengan keyword ODO
+                candidates_with_label.append(num)
+            else:
+                general_candidates.append(num)
 
-            candidates.append(num)
+    # Prioritas 1: Jika ada kandidat dengan label ODO/TOTAL/KM
+    if candidates_with_label:
+        if expected_value is not None:
+            # Pilih kandidat berlabel yang paling dekat dengan expected_value
+            return min(candidates_with_label, key=lambda c: abs(c - expected_value))
+        return max(candidates_with_label)
 
-    # Heuristik: Jika tidak ada label spesifik, ambil angka wajar
-    if candidates:
-        # Filter nilai odometer wajar (misal 100 s/d 999.999 km)
-        reasonable = [c for c in candidates if 100 <= c <= 999999]
-        if reasonable:
-            return max(reasonable)
-        return max(candidates)
+    # Prioritas 2: Jika tidak ada label ODO, gunakan expected_value untuk mencocokkan angka yang paling relevan
+    if general_candidates:
+        valid_cands = [c for c in general_candidates if 100 <= c <= 999999]
+        if valid_cands:
+            if expected_value is not None:
+                # Jika ada angka yang selisihnya wajar (< 30% atau < 1000 km dari expected)
+                closest = min(valid_cands, key=lambda c: abs(c - expected_value))
+                if abs(closest - expected_value) <= max(1000, expected_value * 0.3):
+                    return closest
+            return max(valid_cands)
+
     return None
 
 

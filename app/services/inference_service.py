@@ -44,8 +44,9 @@ def run_inference_for_transaction(transaction_id: int) -> dict:
         odo_img_source = tx_dict.get('odometer_photo_path') or tx_dict.get('odometer_photo_data')
         if odo_img_source:
             try:
-                print(f"[ML Engine] Memulai OCR Odometer dari: {odo_img_source}")
-                ocr_odo_val = read_odometer(odo_img_source)
+                expected_odo = int(float(tx_dict.get('odometer', 0))) if tx_dict.get('odometer') else None
+                print(f"[ML Engine] Memulai OCR Odometer dari: {odo_img_source} (Expected: {expected_odo})")
+                ocr_odo_val = read_odometer(odo_img_source, expected_value=expected_odo)
                 if ocr_odo_val:
                     print(f"[ML Engine] ✅ OCR Odometer berhasil terdeteksi: {ocr_odo_val} km")
             except Exception as odo_err:
